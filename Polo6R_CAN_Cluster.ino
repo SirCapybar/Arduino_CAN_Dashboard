@@ -61,9 +61,9 @@ void sendEngineOnAndESP()
 void sendSpeedRPMDriveMode()
 {
     int speed = static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
-    byte speedLow = speed & 0xFF, speedHigh = (speed >> 8) & 0xFF;
+    byte speed_low = speed & 0xFF, speed_high = (speed >> 8) & 0xFF;
     // motorspeed
-    canSend(0x320, 0, speedLow, speedHigh, 0, 0, 0, 0, 0);
+    canSend(0x320, 0, speed_low, speed_high, 0, 0, 0, 0, 0);
     // rpm
     unsigned short rpm = dashboard.rpm * 4;
     canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
@@ -85,10 +85,10 @@ void sendSpeedRPMDriveMode()
         drive_mode |= 0x08;
     }
     // actual speed and drivemode, could contain mileage counter as byte 5 and 6 (0-indexed)
-    canSend(0x5A0, 0xFF, speedLow, speedHigh, drive_mode, 0, 0, 0, 0xAD);
+    canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
     digitalWrite(HANDBRAKE_CONTROL_PIN, dashboard.handbrake ? LOW : HIGH);
     // for ABS
-    canSend(0x1A0, 0x18, speedLow, speedHigh, 0, 0xFE, 0xFE, 0, 0xFF);
+    canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
 }
 
 void sendSeatBeltWarning()
