@@ -19,6 +19,35 @@
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
 
+#define RESCALE_RPM
+
+/*
+    Usually supported:
+    DataCorePlugin.GamePaused
+    DataCorePlugin.GameData.Rpms
+    DataCorePlugin.GameData.MaxRpm
+    DataCorePlugin.GameData.SpeedKmh
+    DataCorePlugin.GameRawData.Physics.Abs ??
+    DataCorePlugin.GameData.Handbrake
+
+    DataCorePlugin.GameData.Gear -> R,N,1,2,3,...
+    DataCorePlugin.ExternalScript.BlinkingGearUP -> same as gear but changes to UP when upshift needed
+    DataCorePlugin.GameData.CarSettings_RPMRedLineReached -> 0/1
+    DataCorePlugin.GameData.CarSettings_RPMShiftLight1 -> 0.0-1.0
+    DataCorePlugin.GameData.CarSettings_RPMShiftLight2 -> 0.0-1.0
+
+    Supported by ETS2:
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.LightsValues.DashboardBacklight
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.MotorValues.BrakeValues.ParkingBrake
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.EngineEnabled
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.LightsValues.BeamLow
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh
+    DataCorePlugin.GameData.TurnIndicatorLeft
+    DataCorePlugin.GameData.TurnIndicatorRight
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.BatteryVoltage
+    DataCorePlugin.GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.WaterTemperature
+*/
+
 struct DashboardSettings
 {
     unsigned short speed = 0;         // speed [km/h]
@@ -226,6 +255,76 @@ void loop()
         char c = Serial.read();
         switch (c)
         {
+        default:
+        {
+            String s = Serial.readString();
+            switch (c)
+            {
+            // for simhub
+            case 'P':
+                dashboard.door_open_warning = s[0] == '1';
+                break;
+            case 'R':
+            {
+                int sep = s.indexOf(';');
+                int rpm = s.substring(0, sep).toInt();
+#ifdef RESCALE_RPM
+                int max_rpm = s.substring(sep + 1).toInt();
+                rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
+#endif
+                dashboard.rpm = rpm > MAX_RPM ? MAX_RPM : rpm;
+                break;
+            }
+            case 'S':
+            {
+                unsigned short speed = static_cast<unsigned short>(s.toInt());
+                dashboard.speed = speed > MAX_KMH ? MAX_KMH : speed;
+                break;
+            }
+            case 'A':
+                dashboard.abs = s[0] == '1';
+                break;
+            case 'H':
+            {
+                bool handbrake = s[0] == '1';
+                bool parking_brake = s[2] == '1';
+                dashboard.handbrake == handbrake || parking_brake; //todo: this can be separated probably, there are 2 controls in the dashboard
+                break;
+            }
+            case 'G':
+                // todo
+                break;
+            case 'T':
+            {
+                bool left = s[0] == '1';
+                bool right = s[2] == '1';
+                if (left)
+                {
+                    dashboard.turning_lights = right ? 3 : 1;
+                }
+                else
+                {
+                    dashboard.turning_lights = right ? 2 : 0;
+                }
+                break;
+            }
+            case 'L':
+                dashboard.fog_light = s[0] == '1'; // acts as low beam
+                dashboard.high_beam = s[2] == '1';
+                break;
+            case 'B':
+                dashboard.battery_warning = s[0] == '1';
+                break;
+            case 'W':
+                dashboard.high_water_temp = s[0] == '1';
+                break;
+            case 'D':
+                dashboard.backlight = s[0] == '1';
+                break;
+            }
+        }
+        break;
+        // for debugging only
         case 'a':
             dashboard.backlight = !dashboard.backlight;
             break;

@@ -1,0 +1,106 @@
+{
+  "EditorExpanded": true,
+  "SerialPortName": "COM3",
+  "IsFreezed": false,
+  "BaudRate": 115200,
+  "RtsEnable": true,
+  "DtrEnable": true,
+  "LogIncomingData": true,
+  "AutomaticReconnect": true,
+  "SettingsBuilder": {
+    "Settings": [],
+    "IsEditMode": false
+  },
+  "OnConnectMessage": {
+    "Expression": ""
+  },
+  "UpdateMessages": [
+    {
+      "Message": {
+        "Expression": "'P'+[DataCorePlugin.GamePaused]"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'R'+round([Rpms], 0)+';'+round([MaxRpm],0)"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'S'+round([SpeedKmh],0)"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'A'+[ABSActive]"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'H'+if([Handbrake],'1','0')+';'+if([GameRawData.TruckValues.CurrentValues.MotorValues.BrakeValues.ParkingBrake],'1','0')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'G'+[DataCorePlugin.ExternalScript.BlinkingGearUP]"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'T'+[TurnIndicatorLeft]+';'+[TurnIndicatorRight]"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'L'+if([GameRawData.TruckValues.CurrentValues.LightsValues.BeamLow],'1','0')+';'+if([GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh],'1','0')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'B'+if([GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.BatteryVoltage],'1','0')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'W'+if([GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.WaterTemperature],'1','0')"
+      },
+      "IsEnabled": false,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'D'+if([GameRawData.TruckValues.CurrentValues.LightsValues.DashboardBacklight],'1','0')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    }
+  ],
+  "OnDisconnectMessage": {
+    "Expression": ""
+  },
+  "IsConnecting": false,
+  "IsEnabled": false,
+  "IsConnected": false,
+  "Name": "Custom Serial device",
+  "Description": "Serial device",
+  "LastErrorDate": "2022-01-02T19:15:29.4916833+01:00",
+  "LastErrorMessage": null
+}
