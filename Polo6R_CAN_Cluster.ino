@@ -90,9 +90,6 @@ ISR(TIMER1_COMPA_vect)
     // immobilizer
     canSend(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0);
 
-    // engine on and ESP
-    canSend(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
-
     // lights
     byte b0 = dashboard.turning_lights & 0x03;
     if (dashboard.battery_warning)
@@ -177,10 +174,13 @@ ISR(TIMER1_COMPA_vect)
 
     if (can_20hz)
     {
+        // engine on and ESP
+        canSend(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
 
         // motor speed?
         //canSend(0x320, 0x04, 0, 0x40, 0x01, abs_speed_low, abs_speed_high, 0, 0);
-        canSend(0x320, 0, 0, abs_speed_low, abs_speed_high, 0, 0, 0, 0);
+        //canSend(0x320, 0x04, 0, 0x40, abs_speed_low, abs_speed_high, abs_speed_low, abs_speed_high, 0);
+        canSend(0x320, 0, abs_speed_low, abs_speed_high, 0, 0, 0, 0, 0);
 
         // rpm
         unsigned short rpm = dashboard.rpm * 4;
@@ -213,7 +213,7 @@ ISR(TIMER1_COMPA_vect)
         canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
 
         // abs2
-        //canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
+        canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
     }
 
     if (++can_10hz_counter == CAN_10HZ_PRESCALER)
