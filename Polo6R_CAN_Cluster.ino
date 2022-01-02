@@ -13,6 +13,7 @@
 #define HIGH_BEAM_INDICATOR_PIN 7
 
 #define CAN_50HZ_PRESCALER 2  // 2 cycles of 100Hz interrupts
+#define CAN_20HZ_PRESCALER 5  // 5 cycles of 100Hz interrupts
 #define CAN_10HZ_PRESCALER 10 // 10 cycles of 100Hz interrupts
 
 #define MAX_RPM 6000U
@@ -22,7 +23,7 @@ struct DashboardSettings
 {
     unsigned short speed = 0;         // speed [km/h]
     unsigned short rpm = 0;           // revs [rpm]
-    bool backlight = true;            // dashboard backlight (on/off)
+    bool backlight = false;           // dashboard backlight (off/on)
     byte turning_lights = 0;          // turning lights (0: off, 1: left, 2: right, 3: both)
     bool abs = false;                 // ABS lamp (on/off)
     bool offroad = false;             // offroad lamp (on/off)
@@ -83,6 +84,7 @@ void setup()
 ISR(TIMER1_COMPA_vect)
 {
     bool can_10hz = can_10hz_counter % CAN_10HZ_PRESCALER == 0;
+    bool can_20hz = can_10hz_counter % CAN_20HZ_PRESCALER == 0;
     bool can_50hz = can_10hz_counter % CAN_50HZ_PRESCALER == 0;
 
     // immobilizer
@@ -155,14 +157,35 @@ ISR(TIMER1_COMPA_vect)
     }
     canSend(0x480, 0, engine_control, 0, 0, 0, dpf_warning, 0, 0);
 
-    // speed and drive mode
-    int speed = static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
-    byte speed_low = speed & 0xFF, speed_high = (speed >> 8) & 0xFF;
-    // abs
-    canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
+    int speed_prescaled = static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
+    byte speed_low = speed_prescaled & 0xFF, speed_high = (speed_prescaled >> 8) & 0xFF;
 
-    if (can_10hz)
+    int abs_speed_prescaled = static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.01f);
+    byte abs_speed_low = speed_prescaled & 0xFF, abs_speed_high = (speed_prescaled >> 8) & 0xFF;
+    byte abs_speed15_low = (speed_prescaled << 1) & 0xFF, abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
+
+    if (can_50hz)
     {
+        // airbag and seat belt info
+        byte seat_belt = 0;
+        if (dashboard.seat_belt_warning)
+        {
+            seat_belt = 0x04;
+        }
+        canSend(0x050, 0, 0x80, seat_belt, 0, 0, 0, 0, 0);
+    }
+
+    if (can_20hz)
+    {
+
+        // motor speed?
+        //canSend(0x320, 0x04, 0, 0x40, 0x01, abs_speed_low, abs_speed_high, 0, 0);
+        canSend(0x320, 0, 0, abs_speed_low, abs_speed_high, 0, 0, 0, 0);
+
+        // rpm
+        unsigned short rpm = dashboard.rpm * 4;
+        canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
+
         // speed and drive mode
         byte drive_mode = 0;
         if (dashboard.abs)
@@ -184,23 +207,13 @@ ISR(TIMER1_COMPA_vect)
         // actual speed and drivemode, could contain mileage counter as byte 5 and 6 (0-indexed)
         canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
         digitalWrite(HANDBRAKE_CONTROL_PIN, dashboard.handbrake ? LOW : HIGH);
-    }
-    if (can_50hz)
-    {
-        // airbag and seat belt info
-        byte seat_belt = 0;
-        if (dashboard.seat_belt_warning)
-        {
-            seat_belt = 0x04;
-        }
-        canSend(0x050, 0, 0x80, seat_belt, 0, 0, 0, 0, 0);
 
-        // motor speed?
-        canSend(0x320, 0, speed_low, speed_high, 0, 0, 0, 0, 0);
+        // abs1
+        //canSend(0x1A0, 0x04, 0x18, abs_speed15_low, abs_speed15_high, 0xFE, 0xFE, 0, 0x00);
+        canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
 
-        // rpm
-        unsigned short rpm = dashboard.rpm * 4;
-        canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
+        // abs2
+        //canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
     }
 
     if (++can_10hz_counter == CAN_10HZ_PRESCALER)
