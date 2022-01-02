@@ -177,12 +177,10 @@ ISR(TIMER1_COMPA_vect)
         // engine on and ESP
         canSend(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
 
-        // motor speed?
-        //canSend(0x320, 0x04, 0, 0x40, 0x01, abs_speed_low, abs_speed_high, 0, 0);
-        //canSend(0x320, 0x04, 0, 0x40, abs_speed_low, abs_speed_high, abs_speed_low, abs_speed_high, 0);
-        canSend(0x320, 0, abs_speed_low, abs_speed_high, 0, 0, 0, 0, 0);
+        // motor speed? doesn't affect the dashboard at all
+        canSend(0x320, 0x04, 0, 0x40, abs_speed_low, abs_speed_high, abs_speed_low, abs_speed_high, 0);
 
-        // rpm
+        // RPM
         unsigned short rpm = dashboard.rpm * 4;
         canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
 
@@ -208,11 +206,10 @@ ISR(TIMER1_COMPA_vect)
         canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
         digitalWrite(HANDBRAKE_CONTROL_PIN, dashboard.handbrake ? LOW : HIGH);
 
-        // abs1
-        //canSend(0x1A0, 0x04, 0x18, abs_speed15_low, abs_speed15_high, 0xFE, 0xFE, 0, 0x00);
-        canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
+        // ABS1: has to be sent to apply the speed, though it can all be zeros?
+        canSend(0x1A0, 0, 0x18, abs_speed15_low, abs_speed15_high, 0xFE, 0xFE, 0, 0x00);
 
-        // abs2
+        // ABS2: doesn't affect the dashboard?
         canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
     }
 
