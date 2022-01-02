@@ -1,15 +1,19 @@
 #include <mcp_can.h>
 #include <SPI.h>
+#include <avr/interrupt.h>
+#include <avr/io.h>
 
 #define SPI_CS_PIN 10
 #define CAN_ID_MODE MCP_ANY
 #define CAN_SPEED CAN_500KBPS
 #define CAN_CLOCK MCP_8MHZ
-#define CAN_REFRESH_RATE_US 50000UL
 
 #define HANDBRAKE_CONTROL_PIN 9
 #define FOG_LIGHT_INDICATOR_PIN 8
 #define HIGH_BEAM_INDICATOR_PIN 7
+
+#define CAN_50HZ_PRESCALER 2  // 2 cycles of 100Hz interrupts
+#define CAN_10HZ_PRESCALER 10 // 10 cycles of 100Hz interrupts
 
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
@@ -40,7 +44,7 @@ struct DashboardSettings
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
-unsigned long last_can_us = 0UL;
+byte can_10hz_counter = 0;
 
 void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f, byte g, byte h)
 {
@@ -48,81 +52,46 @@ void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f, byte
     can.sendMsgBuf(address, 0, 8, data);
 }
 
-void sendImmobilizer()
+void setup()
 {
+    pinMode(HANDBRAKE_CONTROL_PIN, OUTPUT);
+    pinMode(FOG_LIGHT_INDICATOR_PIN, OUTPUT);
+    pinMode(HIGH_BEAM_INDICATOR_PIN, OUTPUT);
+
+    // initialize CAN module and serial
+    Serial.begin(115200);
+    byte can_result = can.begin(CAN_ID_MODE, CAN_SPEED, CAN_CLOCK);
+    while (can_result != CAN_OK)
+    {
+        Serial.println("CAN initialization failed! Retrying...");
+        delay(250);
+        can_result = can.begin(CAN_ID_MODE, CAN_SPEED, CAN_CLOCK);
+    }
+    Serial.println("CAN initialized!");
+    can.setMode(MCP_NORMAL);
+
+    // configure 16-bit timer
+    cli();                                     // Disable interrupts
+    TCNT1 = 0;                                 // Initialize timer value with 0
+    TCCR1A = 0;                                // Disable timer output pins, zero WGM11:0 for CTC mode with OCR1A
+    TCCR1B = 1 << WGM12 | 1 << CS12;           // Set WGM12 for CTC mode with OCR1A, set CS12:0 to prescaler of 256
+    OCR1A = static_cast<unsigned short>(624U); // So that we get frequency of 100Hz=16'000'000/(256*(624+1))
+    TIMSK1 = 1 << OCIE1A;                      // Enable timer interrupt A
+    sei();                                     // Enable interrupts
+}
+
+ISR(TIMER1_COMPA_vect)
+{
+    bool can_10hz = can_10hz_counter % CAN_10HZ_PRESCALER == 0;
+    bool can_50hz = can_10hz_counter % CAN_50HZ_PRESCALER == 0;
+
+    // immobilizer
     canSend(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0);
-}
 
-void sendEngineOnAndESP()
-{
+    // engine on and ESP
     canSend(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
-}
 
-void sendSpeedRPMDriveMode()
-{
-    int speed = static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
-    byte speed_low = speed & 0xFF, speed_high = (speed >> 8) & 0xFF;
-    // motorspeed
-    canSend(0x320, 0, speed_low, speed_high, 0, 0, 0, 0, 0);
-    // rpm
-    unsigned short rpm = dashboard.rpm * 4;
-    canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
-    byte drive_mode = 0;
-    if (dashboard.abs)
-    {
-        drive_mode |= 0x01;
-    }
-    if (dashboard.offroad)
-    {
-        drive_mode |= 0x02;
-    }
-    if (dashboard.handbrake)
-    {
-        drive_mode |= 0x04;
-    }
-    if (dashboard.low_tire_pressure)
-    {
-        drive_mode |= 0x08;
-    }
-    // actual speed and drivemode, could contain mileage counter as byte 5 and 6 (0-indexed)
-    canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
-    digitalWrite(HANDBRAKE_CONTROL_PIN, dashboard.handbrake ? LOW : HIGH);
-    // for ABS
-    canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
-}
-
-void sendSeatBeltWarning()
-{
-    // airbag and seat belt info
-    byte seat_belt = 0;
-    if (dashboard.seat_belt_warning)
-    {
-        seat_belt = 0x04;
-    }
-    canSend(0x050, 0, 0x80, seat_belt, 0, 0, 0, 0, 0);
-}
-
-void sendEngineControl()
-{
-    byte engine_control = 0;
-    if (dashboard.preheating)
-    {
-        engine_control |= 0x02;
-    }
-    if (dashboard.high_water_temp)
-    {
-        engine_control |= 0x10;
-    }
-    byte dpf_warning = 0;
-    if (dashboard.dpf_warning)
-    {
-        dpf_warning = 0x02;
-    }
-    canSend(0x480, 0, engine_control, 0, 0, 0, dpf_warning, 0, 0);
-}
-
-void sendLights()
-{
+    // lights
     byte b0 = dashboard.turning_lights & 0x03;
     if (dashboard.battery_warning)
     {
@@ -168,45 +137,80 @@ void sendLights()
     canSend(0x470, b0, b1, b2, 0, b4, b5, 0, b7);
     digitalWrite(FOG_LIGHT_INDICATOR_PIN, dashboard.fog_light ? HIGH : LOW);
     digitalWrite(HIGH_BEAM_INDICATOR_PIN, dashboard.high_beam ? HIGH : LOW);
-}
 
-void updateDashboard()
-{
-    unsigned long us = micros();
-    unsigned long diff = us - last_can_us;
-    if (diff >= CAN_REFRESH_RATE_US)
+    // engine control
+    byte engine_control = 0;
+    if (dashboard.preheating)
     {
-        last_can_us += diff / CAN_REFRESH_RATE_US * CAN_REFRESH_RATE_US;
-        sendImmobilizer();
-        sendEngineOnAndESP();
-        sendLights();
-        sendEngineControl();
-        sendSpeedRPMDriveMode();
-        sendSeatBeltWarning();
+        engine_control |= 0x02;
     }
-}
-
-void setup()
-{
-    pinMode(HANDBRAKE_CONTROL_PIN, OUTPUT);
-    pinMode(FOG_LIGHT_INDICATOR_PIN, OUTPUT);
-    pinMode(HIGH_BEAM_INDICATOR_PIN, OUTPUT);
-
-    Serial.begin(115200);
-    byte can_result = can.begin(CAN_ID_MODE, CAN_SPEED, CAN_CLOCK);
-    while (can_result != CAN_OK)
+    if (dashboard.high_water_temp)
     {
-        Serial.println("CAN initialization failed! Retrying...");
-        delay(250);
-        can_result = can.begin(CAN_ID_MODE, CAN_SPEED, CAN_CLOCK);
+        engine_control |= 0x10;
     }
-    Serial.println("CAN initialized!");
-    can.setMode(MCP_NORMAL);
+    byte dpf_warning = 0;
+    if (dashboard.dpf_warning)
+    {
+        dpf_warning = 0x02;
+    }
+    canSend(0x480, 0, engine_control, 0, 0, 0, dpf_warning, 0, 0);
+
+    // speed and drive mode
+    int speed = static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
+    byte speed_low = speed & 0xFF, speed_high = (speed >> 8) & 0xFF;
+    // abs
+    canSend(0x1A0, 0x18, speed_low, speed_high, 0, 0xFE, 0xFE, 0, 0xFF);
+
+    if (can_10hz)
+    {
+        // speed and drive mode
+        byte drive_mode = 0;
+        if (dashboard.abs)
+        {
+            drive_mode |= 0x01;
+        }
+        if (dashboard.offroad)
+        {
+            drive_mode |= 0x02;
+        }
+        if (dashboard.handbrake)
+        {
+            drive_mode |= 0x04;
+        }
+        if (dashboard.low_tire_pressure)
+        {
+            drive_mode |= 0x08;
+        }
+        // actual speed and drivemode, could contain mileage counter as byte 5 and 6 (0-indexed)
+        canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
+        digitalWrite(HANDBRAKE_CONTROL_PIN, dashboard.handbrake ? LOW : HIGH);
+    }
+    if (can_50hz)
+    {
+        // airbag and seat belt info
+        byte seat_belt = 0;
+        if (dashboard.seat_belt_warning)
+        {
+            seat_belt = 0x04;
+        }
+        canSend(0x050, 0, 0x80, seat_belt, 0, 0, 0, 0, 0);
+
+        // motor speed?
+        canSend(0x320, 0, speed_low, speed_high, 0, 0, 0, 0, 0);
+
+        // rpm
+        unsigned short rpm = dashboard.rpm * 4;
+        canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
+    }
+
+    if (++can_10hz_counter == CAN_10HZ_PRESCALER)
+    {
+        can_10hz_counter = 0;
+    }
 }
 
 void loop()
 {
-    updateDashboard();
     if (Serial.available())
     {
         char c = Serial.read();
@@ -267,18 +271,22 @@ void loop()
             dashboard.turning_lights = dashboard.turning_lights == 3 ? 0 : (dashboard.turning_lights + 1);
             break;
         case 's':
+            cli();
             dashboard.speed += 50;
             if (dashboard.speed > MAX_KMH)
             {
                 dashboard.speed = 0;
             }
+            sei();
             break;
         case 't':
+            cli();
             dashboard.rpm += 500;
             if (dashboard.rpm > MAX_RPM)
             {
                 dashboard.rpm = 0;
             }
+            sei();
             break;
         }
     }
