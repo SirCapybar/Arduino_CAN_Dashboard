@@ -8,13 +8,11 @@
 #define CAN_SPEED CAN_500KBPS
 #define CAN_CLOCK MCP_8MHZ
 
-#define HANDBRAKE_CONTROL_PIN 9
+#define PARKING_BRAKE_CONTROL_PIN 9
 #define FOG_LIGHT_INDICATOR_PIN 8
 #define HIGH_BEAM_INDICATOR_PIN 7
 
-#define CAN_50HZ_PRESCALER 2  // 2 cycles of 100Hz interrupts
-#define CAN_20HZ_PRESCALER 5  // 5 cycles of 100Hz interrupts
-#define CAN_10HZ_PRESCALER 10 // 10 cycles of 100Hz interrupts
+#define MICROS_PER_UPDATE 100000UL // 10Hz
 
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
@@ -57,6 +55,7 @@ struct DashboardSettings
     bool abs = false;                 // ABS lamp (on/off)
     bool offroad = false;             // offroad lamp (on/off)
     bool handbrake = false;           // handbrake lamp (on/off)
+    bool parking_brake = false;       // parking brake lamp (on/off)
     bool low_tire_pressure = false;   // low tire pressure lamp (on/off)
     bool door_open_warning = false;   // open door warning lamp (on/off)
     bool clutch_control = false;      // display clutch message on dashboard display (on/off)
@@ -74,7 +73,8 @@ struct DashboardSettings
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
-byte can_10hz_counter = 0;
+unsigned long last_us;
+bool even_interrupt = true;
 
 void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f, byte g, byte h)
 {
@@ -84,7 +84,7 @@ void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f, byte
 
 void setup()
 {
-    pinMode(HANDBRAKE_CONTROL_PIN, OUTPUT);
+    pinMode(PARKING_BRAKE_CONTROL_PIN, OUTPUT);
     pinMode(FOG_LIGHT_INDICATOR_PIN, OUTPUT);
     pinMode(HIGH_BEAM_INDICATOR_PIN, OUTPUT);
 
@@ -99,23 +99,11 @@ void setup()
     }
     Serial.println("CAN initialized!");
     can.setMode(MCP_NORMAL);
-
-    // configure 16-bit timer
-    cli();                                     // Disable interrupts
-    TCNT1 = 0;                                 // Initialize timer value with 0
-    TCCR1A = 0;                                // Disable timer output pins, zero WGM11:0 for CTC mode with OCR1A
-    TCCR1B = 1 << WGM12 | 1 << CS12;           // Set WGM12 for CTC mode with OCR1A, set CS12:0 to prescaler of 256
-    OCR1A = static_cast<unsigned short>(624U); // So that we get frequency of 100Hz=16'000'000/(256*(624+1))
-    TIMSK1 = 1 << OCIE1A;                      // Enable timer interrupt A
-    sei();                                     // Enable interrupts
+    last_us = micros();
 }
 
-ISR(TIMER1_COMPA_vect)
+void updateDashboard()
 {
-    bool can_10hz = can_10hz_counter % CAN_10HZ_PRESCALER == 0;
-    bool can_20hz = can_10hz_counter % CAN_20HZ_PRESCALER == 0;
-    bool can_50hz = can_10hz_counter % CAN_50HZ_PRESCALER == 0;
-
     // immobilizer
     canSend(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0);
 
@@ -190,140 +178,67 @@ ISR(TIMER1_COMPA_vect)
     byte abs_speed_low = speed_prescaled & 0xFF, abs_speed_high = (speed_prescaled >> 8) & 0xFF;
     byte abs_speed15_low = (speed_prescaled << 1) & 0xFF, abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
 
-    if (can_50hz)
+    // airbag and seat belt info
+    byte seat_belt = 0;
+    if (dashboard.seat_belt_warning)
     {
-        // airbag and seat belt info
-        byte seat_belt = 0;
-        if (dashboard.seat_belt_warning)
-        {
-            seat_belt = 0x04;
-        }
-        canSend(0x050, 0, 0x80, seat_belt, 0, 0, 0, 0, 0);
+        seat_belt = 0x04;
     }
+    canSend(0x050, 0, 0x80, seat_belt, 0, 0, 0, 0, 0);
 
-    if (can_20hz)
+    // engine on and ESP
+    canSend(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
+
+    // motor speed? doesn't affect the dashboard at all
+    canSend(0x320, 0x04, 0, 0x40, abs_speed_low, abs_speed_high, abs_speed_low, abs_speed_high, 0);
+
+    // RPM
+    unsigned short rpm = dashboard.rpm * 4;
+    canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
+
+    // speed and drive mode
+    byte drive_mode = 0;
+    if (dashboard.abs)
     {
-        // engine on and ESP
-        canSend(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
-
-        // motor speed? doesn't affect the dashboard at all
-        canSend(0x320, 0x04, 0, 0x40, abs_speed_low, abs_speed_high, abs_speed_low, abs_speed_high, 0);
-
-        // RPM
-        unsigned short rpm = dashboard.rpm * 4;
-        canSend(0x280, 0x49, 0x0E, rpm & 0xFF, (rpm >> 8) & 0xFF, 0, 0, 0, 0);
-
-        // speed and drive mode
-        byte drive_mode = 0;
-        if (dashboard.abs)
-        {
-            drive_mode |= 0x01;
-        }
-        if (dashboard.offroad)
-        {
-            drive_mode |= 0x02;
-        }
-        if (dashboard.handbrake)
-        {
-            drive_mode |= 0x04;
-        }
-        if (dashboard.low_tire_pressure)
-        {
-            drive_mode |= 0x08;
-        }
-        // actual speed and drivemode, could contain mileage counter as byte 5 and 6 (0-indexed)
-        canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
-        digitalWrite(HANDBRAKE_CONTROL_PIN, dashboard.handbrake ? LOW : HIGH);
-
-        // ABS1: has to be sent to apply the speed, though it can all be zeros?
-        canSend(0x1A0, 0, 0x18, abs_speed15_low, abs_speed15_high, 0xFE, 0xFE, 0, 0x00);
-
-        // ABS2: doesn't affect the dashboard?
-        canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
+        drive_mode |= 0x01;
     }
-
-    if (++can_10hz_counter == CAN_10HZ_PRESCALER)
+    if (dashboard.offroad)
     {
-        can_10hz_counter = 0;
+        drive_mode |= 0x02;
     }
+    if (dashboard.handbrake)
+    {
+        drive_mode |= 0x04;
+    }
+    if (dashboard.low_tire_pressure)
+    {
+        drive_mode |= 0x08;
+    }
+    // actual speed and drivemode, could contain mileage counter as byte 5 and 6 (0-indexed)
+    canSend(0x5A0, 0xFF, speed_low, speed_high, drive_mode, 0, 0, 0, 0xAD);
+    digitalWrite(PARKING_BRAKE_CONTROL_PIN, dashboard.parking_brake ? LOW : HIGH);
+
+    // ABS1: has to be sent to apply the speed, though it can all be zeros?
+    canSend(0x1A0, 0, 0x18, abs_speed15_low, abs_speed15_high, 0xFE, 0xFE, 0, 0x00);
+
+    // ABS2: doesn't affect the dashboard?
+    canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
 }
 
 void loop()
 {
+    unsigned long diff = micros() - last_us;
+    if (diff >= MICROS_PER_UPDATE)
+    {
+        last_us += diff / MICROS_PER_UPDATE * MICROS_PER_UPDATE;
+        updateDashboard();
+    }
     if (Serial.available())
     {
         char c = Serial.read();
+        Serial.print(c);
         switch (c)
         {
-        default:
-        {
-            String s = Serial.readString();
-            switch (c)
-            {
-            // for simhub
-            case 'P':
-                dashboard.door_open_warning = s[0] == '1';
-                break;
-            case 'R':
-            {
-                int sep = s.indexOf(';');
-                int rpm = s.substring(0, sep).toInt();
-#ifdef RESCALE_RPM
-                int max_rpm = s.substring(sep + 1).toInt();
-                rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
-#endif
-                dashboard.rpm = rpm > MAX_RPM ? MAX_RPM : rpm;
-                break;
-            }
-            case 'S':
-            {
-                unsigned short speed = static_cast<unsigned short>(s.toInt());
-                dashboard.speed = speed > MAX_KMH ? MAX_KMH : speed;
-                break;
-            }
-            case 'A':
-                dashboard.abs = s[0] == '1';
-                break;
-            case 'H':
-            {
-                bool handbrake = s[0] == '1';
-                bool parking_brake = s[2] == '1';
-                dashboard.handbrake == handbrake || parking_brake; //todo: this can be separated probably, there are 2 controls in the dashboard
-                break;
-            }
-            case 'G':
-                // todo
-                break;
-            case 'T':
-            {
-                bool left = s[0] == '1';
-                bool right = s[2] == '1';
-                if (left)
-                {
-                    dashboard.turning_lights = right ? 3 : 1;
-                }
-                else
-                {
-                    dashboard.turning_lights = right ? 2 : 0;
-                }
-                break;
-            }
-            case 'L':
-                dashboard.fog_light = s[0] == '1'; // acts as low beam
-                dashboard.high_beam = s[2] == '1';
-                break;
-            case 'B':
-                dashboard.battery_warning = s[0] == '1';
-                break;
-            case 'W':
-                dashboard.high_water_temp = s[0] == '1';
-                break;
-            case 'D':
-                dashboard.backlight = s[0] == '1';
-                break;
-            }
-        }
-        break;
         // for debugging only
         case 'a':
             dashboard.backlight = !dashboard.backlight;
@@ -380,22 +295,27 @@ void loop()
             dashboard.turning_lights = dashboard.turning_lights == 3 ? 0 : (dashboard.turning_lights + 1);
             break;
         case 's':
-            cli();
-            dashboard.speed += 50;
-            if (dashboard.speed > MAX_KMH)
+        {
+            unsigned short speed = dashboard.speed + 50;
+            if (speed > MAX_KMH)
             {
-                dashboard.speed = 0;
+                speed = 0;
             }
-            sei();
+            dashboard.speed = speed;
             break;
+        }
         case 't':
-            cli();
-            dashboard.rpm += 500;
-            if (dashboard.rpm > MAX_RPM)
+        {
+            unsigned short rpm = dashboard.rpm + 500;
+            if (rpm > MAX_RPM)
             {
-                dashboard.rpm = 0;
+                rpm = 0;
             }
-            sei();
+            dashboard.rpm = rpm;
+            break;
+        }
+        case 'u':
+            dashboard.parking_brake = !dashboard.parking_brake;
             break;
         }
     }
