@@ -12,8 +12,6 @@
 #define FOG_LIGHT_INDICATOR_PIN 8
 #define HIGH_BEAM_INDICATOR_PIN 7
 
-#define MICROS_PER_UPDATE 100000UL // 10Hz
-
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
 
@@ -53,7 +51,7 @@ struct DashboardSettings
 {
     unsigned short speed = 0;         // speed [km/h]
     unsigned short rpm = 0;           // revs [rpm]
-    bool backlight = true;            // dashboard backlight (off/on)
+    bool backlight = false;           // dashboard backlight (off/on)
     byte turning_lights = 0;          // turning lights (0: off, 1: left, 2: right, 3: both)
     bool abs = false;                 // ABS lamp (on/off)
     bool offroad = false;             // offroad lamp (on/off)
@@ -76,8 +74,6 @@ struct DashboardSettings
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
-unsigned long last_us;
-bool even_interrupt = true;
 
 void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f, byte g, byte h)
 {
@@ -91,6 +87,15 @@ void setup()
     pinMode(FOG_LIGHT_INDICATOR_PIN, OUTPUT);
     pinMode(HIGH_BEAM_INDICATOR_PIN, OUTPUT);
 
+    // configure 16-bit timer
+    cli();                                       // Disable interrupts
+    TCNT1 = 0;                                   // Initialize timer value with 0
+    TCCR1A = 0;                                  // Disable timer output pins, zero WGM11:0 for CTC mode with OCR1A
+    TCCR1B = 1 << WGM12 | 1 << CS11;             // Set WGM12 for CTC mode with OCR1A, set CS12:0 to prescaler of 64
+    OCR1A = static_cast<unsigned short>(24999U); // So that we get frequency of 10Hz=16'000'000/(64*(24999+1))
+    TIMSK1 = 1 << OCIE1A;                        // Enable timer interrupt A
+    sei();                                       // Enable interrupts
+
     // initialize CAN module and serial
     Serial.begin(115200);
     byte can_result = can.begin(CAN_ID_MODE, CAN_SPEED, CAN_CLOCK);
@@ -102,10 +107,9 @@ void setup()
     }
     Serial.println("CAN initialized!");
     can.setMode(MCP_NORMAL);
-    last_us = micros();
 }
 
-void updateDashboard()
+ISR(TIMER1_COMPA_vect)
 {
     // immobilizer
     canSend(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0);
@@ -277,17 +281,10 @@ int readInt(const char *&str)
 
 void loop()
 {
-    unsigned long diff = micros() - last_us;
-    if (diff >= MICROS_PER_UPDATE)
-    {
-        last_us += diff / MICROS_PER_UPDATE * MICROS_PER_UPDATE;
-        updateDashboard();
-    }
     if (Serial.available())
     {
         unsigned long start = micros();
         String line = Serial.readString();
-        // Serial.println(line);
         const char *cstr = line.c_str();
         // PAUSE;RPM;MAX_RPM;SPEED;MAX_SPEED;ABS;HANDBRAKE;PARKING_BRAKE;TURN_LEFT;TURN_RIGHT;HIGH_BEAM;BATTERY_VOLTAGE;WATER_TEMPERATURE;BACKLIGHT;
         // Xbool;int;int;int;int;bool;bool;bool;bool;bool;bool;bool;bool;bool;
@@ -301,7 +298,10 @@ void loop()
             int rpm = readInt(cstr);
             int max_rpm = readInt(cstr);
 #ifdef RESCALE_RPM
-            rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
+            if (max_rpm != 0)
+            {
+                rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
+            }
 #endif
             if (rpm > MAX_RPM)
             {
@@ -315,7 +315,10 @@ void loop()
             int speed = readInt(cstr);
             int max_speed = readInt(cstr);
 #ifdef RESCALE_KMH
-            speed = map(speed, 0, max_speed, 0, MAX_KMH);
+            if (max_speed != 0)
+            {
+                speed = map(speed, 0, max_speed, 0, MAX_KMH);
+            }
 #endif
             if (speed > MAX_KMH)
             {
@@ -344,7 +347,5 @@ void loop()
             bool water_temperature_warning = readBool(cstr); // don't use this please, it's loud AF
             bool backlight = readBool(cstr);                 // I don't like disabling the backlight, keep it on
         }
-        int diff = micros() - start;
-        Serial.println(diff);
     }
 }
