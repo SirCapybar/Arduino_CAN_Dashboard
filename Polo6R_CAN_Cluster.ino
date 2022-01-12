@@ -17,7 +17,10 @@
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
 
+#define MSG_DELIMITER ';'
+
 #define RESCALE_RPM
+#define RESCALE_KMH
 
 /*
     Usually supported:
@@ -50,7 +53,7 @@ struct DashboardSettings
 {
     unsigned short speed = 0;         // speed [km/h]
     unsigned short rpm = 0;           // revs [rpm]
-    bool backlight = false;           // dashboard backlight (off/on)
+    bool backlight = true;            // dashboard backlight (off/on)
     byte turning_lights = 0;          // turning lights (0: off, 1: left, 2: right, 3: both)
     bool abs = false;                 // ABS lamp (on/off)
     bool offroad = false;             // offroad lamp (on/off)
@@ -225,6 +228,53 @@ void updateDashboard()
     canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
 }
 
+int find_next_delimiter(const char *str)
+{
+    int counter = 0;
+    do
+    {
+        if (*str == MSG_DELIMITER)
+        {
+            return counter;
+        }
+        ++str;
+        ++counter;
+    } while (*str != '\0');
+    return -1;
+}
+
+int str2int(const char *str, int len)
+{
+    int ret = 0;
+    for (int i = 0; i < len; ++i)
+    {
+        ret = ret * 10 + (str[i] - '0');
+    }
+    return ret;
+}
+
+bool readBool(const char *&str)
+{
+    bool result = *str == '1';
+    str += 2;
+    return result;
+}
+
+char readChar(const char *&str)
+{
+    char result = *str;
+    str += 2;
+    return result;
+}
+
+int readInt(const char *&str)
+{
+    int next_delimiter_ind = find_next_delimiter(str);
+    int result = str2int(str, next_delimiter_ind);
+    str += next_delimiter_ind + 1;
+    return result;
+}
+
 void loop()
 {
     unsigned long diff = micros() - last_us;
@@ -235,88 +285,66 @@ void loop()
     }
     if (Serial.available())
     {
-        char c = Serial.read();
-        Serial.print(c);
-        switch (c)
+        unsigned long start = micros();
+        String line = Serial.readString();
+        // Serial.println(line);
+        const char *cstr = line.c_str();
+        // PAUSE;RPM;MAX_RPM;SPEED;MAX_SPEED;ABS;HANDBRAKE;PARKING_BRAKE;TURN_LEFT;TURN_RIGHT;HIGH_BEAM;BATTERY_VOLTAGE;WATER_TEMPERATURE;BACKLIGHT;
+        // Xbool;int;int;int;int;bool;bool;bool;bool;bool;bool;bool;bool;bool;
+        // example: X1;500;1000;50;100;1;1;1;1;1;1;1;0;1;
+        if (*cstr == 'X') // the message starts with an X
         {
-        // for debugging only
-        case 'a':
-            dashboard.backlight = !dashboard.backlight;
-            break;
-        case 'b':
-            dashboard.abs = !dashboard.abs;
-            break;
-        case 'c':
-            dashboard.offroad = !dashboard.offroad;
-            break;
-        case 'd':
-            dashboard.handbrake = !dashboard.handbrake;
-            break;
-        case 'e':
-            dashboard.low_tire_pressure = !dashboard.low_tire_pressure;
-            break;
-        case 'f':
-            dashboard.door_open_warning = !dashboard.door_open_warning;
-            break;
-        case 'g':
-            dashboard.clutch_control = !dashboard.clutch_control; // "EMBRAY"
-            break;
-        case 'h':
-            dashboard.check_lamp = !dashboard.check_lamp;
-            break;
-        case 'i':
-            dashboard.trunk_open_warning = !dashboard.trunk_open_warning;
-            break;
-        case 'j':
-            dashboard.battery_warning = !dashboard.battery_warning;
-            break;
-        case 'k':
-            dashboard.key_battery_warning = !dashboard.key_battery_warning; // "PILECLE"
-            break;
-        case 'l':
-            dashboard.fog_light = !dashboard.fog_light;
-            break;
-        case 'm':
-            dashboard.high_beam = !dashboard.high_beam;
-            break;
-        case 'n':
-            dashboard.seat_belt_warning = !dashboard.seat_belt_warning;
-            break;
-        case 'o':
-            dashboard.preheating = !dashboard.preheating;
-            break;
-        case 'p':
-            dashboard.high_water_temp = !dashboard.high_water_temp;
-            break;
-        case 'q':
-            dashboard.dpf_warning = !dashboard.dpf_warning;
-            break;
-        case 'r':
-            dashboard.turning_lights = dashboard.turning_lights == 3 ? 0 : (dashboard.turning_lights + 1);
-            break;
-        case 's':
-        {
-            unsigned short speed = dashboard.speed + 50;
-            if (speed > MAX_KMH)
-            {
-                speed = 0;
-            }
-            dashboard.speed = speed;
-            break;
-        }
-        case 't':
-        {
-            unsigned short rpm = dashboard.rpm + 500;
+            ++cstr;
+            bool pause = readBool(cstr);
+            dashboard.door_open_warning = pause;
+            dashboard.trunk_open_warning = pause;
+            int rpm = readInt(cstr);
+            int max_rpm = readInt(cstr);
+#ifdef RESCALE_RPM
+            rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
+#endif
             if (rpm > MAX_RPM)
+            {
+                rpm = MAX_RPM;
+            }
+            else if (rpm < 0)
             {
                 rpm = 0;
             }
             dashboard.rpm = rpm;
-            break;
+            int speed = readInt(cstr);
+            int max_speed = readInt(cstr);
+#ifdef RESCALE_KMH
+            speed = map(speed, 0, max_speed, 0, MAX_KMH);
+#endif
+            if (speed > MAX_KMH)
+            {
+                speed = MAX_KMH;
+            }
+            else if (speed < 0)
+            {
+                speed = 0;
+            }
+            dashboard.speed = speed;
+            dashboard.abs = readBool(cstr);
+            dashboard.handbrake = readBool(cstr);
+            dashboard.parking_brake = readBool(cstr);
+            bool turn_left = readBool(cstr);
+            bool turn_right = readBool(cstr);
+            if (turn_left)
+            {
+                dashboard.turning_lights = turn_right ? 3 : 1;
+            }
+            else
+            {
+                dashboard.turning_lights = turn_right ? 2 : 0;
+            }
+            dashboard.high_beam = readBool(cstr);
+            dashboard.battery_warning = readBool(cstr);
+            bool water_temperature_warning = readBool(cstr); // don't use this please, it's loud AF
+            bool backlight = readBool(cstr);                 // I don't like disabling the backlight, keep it on
         }
-        case 'u':
-            dashboard.parking_brake = !dashboard.parking_brake;
-            break;
-        }
+        int diff = micros() - start;
+        Serial.println(diff);
     }
 }
