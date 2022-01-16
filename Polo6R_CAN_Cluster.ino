@@ -74,6 +74,7 @@ struct DashboardSettings
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
+bool mid_interrupt = false;
 
 void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f, byte g, byte h)
 {
@@ -111,6 +112,11 @@ void setup()
 
 ISR(TIMER1_COMPA_vect)
 {
+    if (mid_interrupt)
+    {
+        return;
+    }
+    mid_interrupt = true;
     // immobilizer
     canSend(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0);
 
@@ -230,6 +236,7 @@ ISR(TIMER1_COMPA_vect)
 
     // ABS2: doesn't affect the dashboard?
     canSend(0x4A0, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high, abs_speed15_low, abs_speed15_high);
+    mid_interrupt = false;
 }
 
 int find_next_delimiter(const char *str)
@@ -281,10 +288,11 @@ int readInt(const char *&str)
 
 void loop()
 {
-    if (Serial.available())
+    if (!mid_interrupt && Serial.available())
     {
-        unsigned long start = micros();
+        mid_interrupt = true;
         String line = Serial.readString();
+        mid_interrupt = false;
         const char *cstr = line.c_str();
         // PAUSE;RPM;MAX_RPM;SPEED;MAX_SPEED;ABS;HANDBRAKE;PARKING_BRAKE;TURN_LEFT;TURN_RIGHT;HIGH_BEAM;BATTERY_VOLTAGE;WATER_TEMPERATURE;BACKLIGHT;
         // Xbool;int;int;int;int;bool;bool;bool;bool;bool;bool;bool;bool;bool;
