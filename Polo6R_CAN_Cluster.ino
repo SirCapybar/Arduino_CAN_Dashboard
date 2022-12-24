@@ -1,5 +1,4 @@
 #include <SPI.h>
-#include <avr/interrupt.h>
 #include <avr/io.h>
 #include <mcp_can.h>
 
@@ -15,6 +14,7 @@
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
 
+#define MSG_VALUE_SEPARATOR ':'
 #define MSG_DELIMITER ';'
 
 #define RESCALE_RPM
@@ -65,7 +65,7 @@ struct DashboardSettings
     bool check_lamp =
         false;                       // display 'check lamp' message on dashboard display (on/off)
     bool trunk_open_warning = false; // open trunk warning lamp (on/off)
-    bool battery_warning = false;    // battery warning lamp (on/off)
+    bool battery_warning = true;     // battery warning lamp (on/off)
     bool key_battery_warning =
         false;                      // display 'key battery low' message on dashboard display. probably
                                     // works only at start (on/off)
@@ -98,29 +98,15 @@ struct CanPacket
     }
 };
 
-CanPacket buffer1[10], buffer2[10];
-CanPacket *write_buffer = buffer1, *send_buffer = buffer2;
-bool write_buffer_ready = false, send_buffer_ready = false, buffer_sent = false;
+unsigned long micros_timer_100hz = 0, micros_timer_50hz = 0, micros_timer_10hz = 0;
+
+CanPacket packet_buffer[10];
 
 const size_t SERIAL_BUFFER_SIZE = 64;
 char serial_buffer[SERIAL_BUFFER_SIZE];
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
-
-void swapBuffers()
-{
-    CanPacket *tmp = send_buffer;
-    send_buffer = write_buffer;
-    write_buffer = tmp;
-}
-
-void canSend(short address, byte a, byte b, byte c, byte d, byte e, byte f,
-             byte g, byte h)
-{
-    unsigned char data[8] = {a, b, c, d, e, f, g, h};
-    can.sendMsgBuf(address, 0, 8, data);
-}
 
 void canSend(CanPacket &packet)
 {
@@ -129,33 +115,58 @@ void canSend(CanPacket &packet)
 
 void preparePackets()
 {
-    // immobilizer
-    write_buffer[0] = CanPacket(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0);
-    // lights
-    write_buffer[1] = CanPacket(0x470, 0, 0, 0, 0, 0, 0, 0, 0);
-    // engine control
-    write_buffer[2] = CanPacket(0x480, 0, 0, 0, 0, 0, 0, 0, 0);
-    // airbag and seat belt info
-    write_buffer[3] = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0);
-    // engine on and ESP
-    write_buffer[4] = CanPacket(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0);
-    // motor speed? doesn't affect the dashboard at all
-    write_buffer[5] = CanPacket(0x320, 0x04, 0, 0x40, 0, 0, 0, 0, 0);
-    // rpm
-    write_buffer[6] = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0, 0, 0, 0);
-    // speed, drivemode, potentially mileage
-    write_buffer[7] = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD);
-    // ABS1: has to be sent to apply the speed, though it can all be zeros?
-    write_buffer[8] = CanPacket(0x1A0, 0, 0x18, 0, 0, 0xFE, 0xFE, 0, 0x00);
-    // ABS2: doesn't affect the dashboard?
-    write_buffer[9] = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0);
+    // for frequencies see https://christian-rossow.de/publications/vatican-ches2016.pdf
+    // possibly correct?
 
-    fillPacketBuffer();
+    // immobilizer
+    packet_buffer[0] = CanPacket(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    // lights
+    packet_buffer[1] = CanPacket(0x470, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    // engine control
+    packet_buffer[2] = CanPacket(0x480, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    // airbag and seat belt info
+    packet_buffer[3] = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0); // 20ms / 50Hz
+    // engine on and ESP
+    packet_buffer[4] = CanPacket(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    // motor speed? doesn't affect the dashboard at all
+    packet_buffer[5] = CanPacket(0x320, 0x04, 0, 0x40, 0, 0, 0, 0, 0); // 20ms / 50Hz
+    // rpm
+    packet_buffer[6] = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0, 0, 0, 0); // 20ms / 50Hz
+    // speed, drivemode, potentially mileage
+    packet_buffer[7] = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
+    // ABS1: has to be sent to apply the speed, though it can all be zeros?
+    packet_buffer[8] = CanPacket(0x1A0, 0, 0x18, 0, 0, 0xFE, 0xFE, 0, 0x00); // 10ms / 100Hz
+    // ABS2: doesn't affect the dashboard?
+    packet_buffer[9] = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
+
+    fillPacketBufferAndUpdatePins();
 }
 
-void fillPacketBuffer()
+void sendPackets100Hz()
 {
-    auto &lights = write_buffer[1].data;
+    canSend(packet_buffer[8]);
+    canSend(packet_buffer[9]);
+}
+
+void sendPackets50Hz()
+{
+    canSend(packet_buffer[3]);
+    canSend(packet_buffer[5]);
+    canSend(packet_buffer[6]);
+}
+
+void sendPackets10Hz()
+{
+    canSend(packet_buffer[0]);
+    canSend(packet_buffer[1]);
+    canSend(packet_buffer[2]);
+    canSend(packet_buffer[4]);
+    canSend(packet_buffer[7]);
+}
+
+void updateLights()
+{
+    auto &lights = packet_buffer[1].data;
     lights[0] = dashboard.turning_lights & 0x03;
     if (dashboard.battery_warning)
     {
@@ -198,9 +209,11 @@ void fillPacketBuffer()
     {
         lights[7] |= 0x40;
     }
+}
 
-    // engine control
-    auto &engine_control = write_buffer[2].data;
+void updateEngineControl()
+{
+    auto &engine_control = packet_buffer[2].data;
     engine_control[1] = 0;
     if (dashboard.preheating)
     {
@@ -215,7 +228,17 @@ void fillPacketBuffer()
     {
         engine_control[5] = 0x02;
     }
+}
 
+void updateRpm()
+{
+    unsigned short rpm = dashboard.rpm * 4;
+    packet_buffer[6].data[2] = rpm & 0xFF;
+    packet_buffer[6].data[3] = (rpm >> 8) & 0xFF;
+}
+
+void updateMotor()
+{
     int speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
     byte speed_low = speed_prescaled & 0xFF,
@@ -228,21 +251,16 @@ void fillPacketBuffer()
     byte abs_speed15_low = (speed_prescaled << 1) & 0xFF,
          abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
 
-    write_buffer[3].data[2] = dashboard.seat_belt_warning ? 0x04 : 0;
+    packet_buffer[3].data[2] = dashboard.seat_belt_warning ? 0x04 : 0;
 
-    auto &motor_speed = write_buffer[5].data;
+    auto &motor_speed = packet_buffer[5].data;
     motor_speed[3] = abs_speed_low;
     motor_speed[4] = abs_speed_high;
     motor_speed[5] = abs_speed_low;
     motor_speed[6] = abs_speed_high;
 
-    // RPM
-    unsigned short rpm = dashboard.rpm * 4;
-    write_buffer[6].data[2] = rpm & 0xFF;
-    write_buffer[6].data[3] = (rpm >> 8) & 0xFF;
-
     // speed and drive mode
-    auto &drive = write_buffer[7].data;
+    auto &drive = packet_buffer[7].data;
     drive[1] = speed_low;
     drive[2] = speed_high;
     drive[3] = 0;
@@ -264,12 +282,12 @@ void fillPacketBuffer()
     }
 
     // ABS1: has to be sent to apply the speed, though it can all be zeros?
-    auto &abs1 = write_buffer[8].data;
+    auto &abs1 = packet_buffer[8].data;
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
 
     // ABS2: doesn't affect the dashboard?
-    auto &abs2 = write_buffer[9].data;
+    auto &abs2 = packet_buffer[9].data;
     abs2[0] = abs_speed15_low;
     abs2[1] = abs_speed15_high;
     abs2[2] = abs_speed15_low;
@@ -280,61 +298,35 @@ void fillPacketBuffer()
     abs2[7] = abs_speed15_high;
 }
 
-void updatePins()
+inline void fillPacketBufferAndUpdatePins()
+{
+    updateLights();
+    updateEngineControl();
+    updateRpm();
+    updateMotor();
+    updatePins();
+}
+
+inline void updateFogLight()
 {
     digitalWrite(FOG_LIGHT_INDICATOR_PIN, dashboard.fog_light ? HIGH : LOW);
+}
+
+inline void updateHighBeam()
+{
     digitalWrite(HIGH_BEAM_INDICATOR_PIN, dashboard.high_beam ? HIGH : LOW);
+}
+
+inline void updateParkingBrake()
+{
     digitalWrite(PARKING_BRAKE_CONTROL_PIN, dashboard.parking_brake ? LOW : HIGH);
 }
 
-ISR(TIMER1_COMPA_vect)
+inline void updatePins()
 {
-    if (buffer_sent)
-    {
-        if (write_buffer_ready)
-        {
-            swapBuffers();
-            write_buffer_ready = false;
-            buffer_sent = false;
-            return;
-        }
-        else
-        {
-            send_buffer_ready = false;
-            buffer_sent = false;
-        }
-    }
-    else if (write_buffer_ready)
-    {
-        return;
-    }
-
-    fillPacketBuffer();
-
-    if (send_buffer_ready)
-    {
-        write_buffer_ready = true;
-    }
-    else
-    {
-        swapBuffers();
-        send_buffer_ready = true;
-    }
-}
-
-int find_next_delimiter(const char *str)
-{
-    int counter = 0;
-    do
-    {
-        if (*str == MSG_DELIMITER)
-        {
-            return counter;
-        }
-        ++str;
-        ++counter;
-    } while (*str != '\0');
-    return -1;
+    updateFogLight();
+    updateHighBeam();
+    updateParkingBrake();
 }
 
 inline int str2int(const char *str, int len)
@@ -351,7 +343,7 @@ inline int getSeparatorIndex(const char *str, int len)
 {
     for (int i = 0; i < len; ++i)
     {
-        if (str[i] == ':')
+        if (str[i] == MSG_VALUE_SEPARATOR)
         {
             return i;
         }
@@ -359,163 +351,157 @@ inline int getSeparatorIndex(const char *str, int len)
     return -1;
 }
 
-void sendPackets()
+bool processSerialCommand()
 {
-    if (!send_buffer_ready || buffer_sent)
+    if (!Serial.available())
     {
-        return;
+        return false;
     }
-    canSend(send_buffer[0]);
-    canSend(send_buffer[1]);
-    canSend(send_buffer[2]);
-    canSend(send_buffer[3]);
-    canSend(send_buffer[4]);
-    canSend(send_buffer[5]); // possibly not needed
-    canSend(send_buffer[6]);
-    canSend(send_buffer[7]);
-    canSend(send_buffer[8]);
-    canSend(send_buffer[9]); // possibly not needed
-    buffer_sent = true;
-    updatePins();
-}
-
-void processSerialCommand()
-{
-    if (Serial.available())
+    int len = Serial.readBytesUntil(MSG_DELIMITER, serial_buffer, SERIAL_BUFFER_SIZE);
+    if (len < 2)
     {
-        int len = Serial.readBytesUntil(';', serial_buffer, SERIAL_BUFFER_SIZE);
-        if (len < 2)
+        return true;
+    }
+    --len;
+    switch (serial_buffer[0])
+    {
+    case 'A': // pause (bool)
+        dashboard.trunk_open_warning = dashboard.door_open_warning =
+            serial_buffer[1] == '1';
+        updateLights();
+        break;
+    case 'B': // rpm:max_rpm (int)
+    {
+        const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
+        if (separator_index == 0)
         {
-            return;
-        }
-        --len;
-        switch (serial_buffer[0])
-        {
-        case 'A': // pause (bool)
-            dashboard.trunk_open_warning = dashboard.door_open_warning =
-                serial_buffer[1] == '1';
             break;
-        case 'B': // rpm:max_rpm (int)
-        {
-            const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
-            if (separator_index == 0)
-            {
-                break;
-            }
-            const bool no_max_rpm =
-                separator_index == (len - 1) || separator_index == -1;
-            int rpm = str2int(serial_buffer + 1,
-                              (separator_index == -1) ? len : separator_index);
+        }
+        const bool no_max_rpm =
+            separator_index == (len - 1) || separator_index == -1;
+        int rpm = str2int(serial_buffer + 1,
+                          (separator_index == -1) ? len : separator_index);
 #ifdef RESCALE_RPM
-            if (!no_max_rpm)
+        if (!no_max_rpm)
+        {
+            const int max_rpm = str2int(serial_buffer + 2 + separator_index,
+                                        len - separator_index - 1);
+            if (max_rpm != 0)
             {
-                const int max_rpm = str2int(serial_buffer + 2 + separator_index,
-                                            len - separator_index - 1);
-                if (max_rpm != 0)
-                {
-                    rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
-                }
+                rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
             }
+        }
 #endif
-            if (rpm > MAX_RPM)
-            {
-                rpm = MAX_RPM;
-            }
-            else if (rpm < 0)
-            {
-                rpm = 0;
-            }
-            dashboard.rpm = rpm;
-            break;
-        }
-        case 'C': // speed:max_speed (int)
+        if (rpm > MAX_RPM)
         {
-            const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
-            if (separator_index == 0)
-            {
-                break;
-            }
-            const bool no_max_speed =
-                separator_index == (len - 1) || separator_index == -1;
-            int speed = str2int(serial_buffer + 1,
-                                (separator_index == -1) ? len : separator_index);
-#ifdef RESCALE_KMH
-            if (!no_max_speed)
-            {
-                const int max_speed = str2int(serial_buffer + 2 + separator_index,
-                                              len - separator_index - 1);
-                if (max_speed != 0)
-                {
-                    speed = map(speed, 0, max_speed, 0, MAX_KMH);
-                }
-            }
-#endif
-            if (speed > MAX_KMH)
-            {
-                speed = MAX_KMH;
-            }
-            else if (speed < 0)
-            {
-                speed = 0;
-            }
-            dashboard.speed = speed;
-            break;
+            rpm = MAX_RPM;
         }
-        case 'D': // abs (bool)
-            dashboard.abs = serial_buffer[1] == '1';
-            break;
-        case 'E': // handbrake (bool)
-            dashboard.handbrake = serial_buffer[1] == '1';
-            break;
-        case 'F': // parking_brake (bool)
-            dashboard.parking_brake = serial_buffer[1] == '1';
-            break;
-        case 'G': // turn_left (bool)
+        else if (rpm < 0)
         {
-            bool turn_left = serial_buffer[1] == '1';
-            bool turn_right = dashboard.turning_lights & 0x02;
-            if (turn_left)
-            {
-                dashboard.turning_lights = turn_right ? 3 : 1;
-            }
-            else
-            {
-                dashboard.turning_lights = turn_right ? 2 : 0;
-            }
-            break;
+            rpm = 0;
         }
-        case 'H': // turn_right (bool)
-        {
-            bool turn_left = dashboard.turning_lights & 0x01;
-            bool turn_right = serial_buffer[1] == '1';
-            if (turn_left)
-            {
-                dashboard.turning_lights = turn_right ? 3 : 1;
-            }
-            else
-            {
-                dashboard.turning_lights = turn_right ? 2 : 0;
-            }
-            break;
-        }
-        case 'I': // high_beam (bool)
-            dashboard.high_beam = serial_buffer[1] == '1';
-            break;
-        case 'J': // battery_voltage (bool)
-            dashboard.battery_warning = serial_buffer[1] == '1';
-            break;
-        case 'K': // water_temperature (bool)
-            dashboard.high_water_temp =
-                serial_buffer[1] == '1'; // loud AF, don't use it please
-            break;
-        case 'L': // backlight (bool)
-            dashboard.backlight = serial_buffer[1] ==
-                                  '1'; // I prefer it with backlight being always on!
-            break;
-        default:
-            return;
-        }
+        dashboard.rpm = rpm;
+        updateRpm();
+        break;
     }
+    case 'C': // speed:max_speed (int)
+    {
+        const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
+        if (separator_index == 0)
+        {
+            break;
+        }
+        const bool no_max_speed =
+            separator_index == (len - 1) || separator_index == -1;
+        int speed = str2int(serial_buffer + 1,
+                            (separator_index == -1) ? len : separator_index);
+#ifdef RESCALE_KMH
+        if (!no_max_speed)
+        {
+            const int max_speed = str2int(serial_buffer + 2 + separator_index,
+                                          len - separator_index - 1);
+            if (max_speed != 0)
+            {
+                speed = map(speed, 0, max_speed, 0, MAX_KMH);
+            }
+        }
+#endif
+        if (speed > MAX_KMH)
+        {
+            speed = MAX_KMH;
+        }
+        else if (speed < 0)
+        {
+            speed = 0;
+        }
+        dashboard.speed = speed;
+        updateMotor();
+        break;
+    }
+    case 'D': // abs (bool)
+        dashboard.abs = serial_buffer[1] == '1';
+        updateMotor();
+        break;
+    case 'E': // handbrake (bool)
+        dashboard.handbrake = serial_buffer[1] == '1';
+        updateMotor();
+        break;
+    case 'F': // parking_brake (bool)
+        dashboard.parking_brake = serial_buffer[1] == '1';
+        updateParkingBrake();
+        break;
+    case 'G': // turn_left (bool)
+    {
+        bool turn_left = serial_buffer[1] == '1';
+        bool turn_right = dashboard.turning_lights & 0x02;
+        if (turn_left)
+        {
+            dashboard.turning_lights = turn_right ? 3 : 1;
+        }
+        else
+        {
+            dashboard.turning_lights = turn_right ? 2 : 0;
+        }
+        updateLights();
+        break;
+    }
+    case 'H': // turn_right (bool)
+    {
+        bool turn_left = dashboard.turning_lights & 0x01;
+        bool turn_right = serial_buffer[1] == '1';
+        if (turn_left)
+        {
+            dashboard.turning_lights = turn_right ? 3 : 1;
+        }
+        else
+        {
+            dashboard.turning_lights = turn_right ? 2 : 0;
+        }
+        updateLights();
+        break;
+    }
+    case 'I': // high_beam (bool)
+        dashboard.high_beam = serial_buffer[1] == '1';
+        updateHighBeam();
+        break;
+    case 'J': // battery_voltage (bool)
+        dashboard.battery_warning = serial_buffer[1] == '1';
+        updateLights();
+        break;
+    case 'K': // water_temperature (bool)
+        dashboard.high_water_temp =
+            serial_buffer[1] == '1'; // loud AF, don't use it please
+        updateEngineControl();
+        break;
+    case 'L': // backlight (bool)
+        dashboard.backlight = serial_buffer[1] ==
+                              '1'; // I prefer it with backlight being always on!
+        updateLights();
+        break;
+    default:
+        break;
+    }
+    return true;
 }
 
 void setup()
@@ -523,18 +509,6 @@ void setup()
     pinMode(PARKING_BRAKE_CONTROL_PIN, OUTPUT);
     pinMode(FOG_LIGHT_INDICATOR_PIN, OUTPUT);
     pinMode(HIGH_BEAM_INDICATOR_PIN, OUTPUT);
-
-    // configure 16-bit timer
-    cli();                           // Disable interrupts
-    TCNT1 = 0;                       // Initialize timer value with 0
-    TCCR1A = 0;                      // Disable timer output pins, zero WGM11:0 for CTC mode with OCR1A
-    TCCR1B = 1 << WGM12 | 1 << CS11; // Set WGM12 for CTC mode with OCR1A, set
-                                     // CS12:0 to prescaler of 64
-    OCR1A = static_cast<unsigned short>(
-        12499U);          // So that we get frequency of 10Hz=16'000'000/(64*(24999+1)),
-                          // can be changed to 12499 for 20Hz
-    TIMSK1 = 1 << OCIE1A; // Enable timer interrupt A
-    sei();                // Enable interrupts
 
     // initialize CAN module and serial
     Serial.begin(115200);
@@ -548,10 +522,26 @@ void setup()
     Serial.println("CAN initialized!");
     can.setMode(MCP_NORMAL);
     preparePackets();
+    micros_timer_10hz = micros_timer_50hz = micros_timer_100hz = micros();
 }
 
 void loop()
 {
-    sendPackets();
+    const unsigned long us = micros();
+    if ((us - micros_timer_100hz) >= 10000) // 10ms / 100Hz
+    {
+        sendPackets100Hz();
+        micros_timer_100hz += 10000;
+    }
+    if ((us - micros_timer_50hz) >= 20000) // 20ms / 50Hz
+    {
+        sendPackets50Hz();
+        micros_timer_50hz += 20000;
+    }
+    if ((us - micros_timer_10hz) >= 100000) // 100ms / 10Hz
+    {
+        sendPackets10Hz();
+        micros_timer_10hz += 100000;
+    }
     processSerialCommand();
 }
