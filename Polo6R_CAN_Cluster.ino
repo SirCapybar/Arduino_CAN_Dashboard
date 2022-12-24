@@ -142,26 +142,36 @@ void preparePackets()
     fillPacketBufferAndUpdatePins();
 }
 
-void sendPackets100Hz()
+void sendPackets(bool hz100, bool hz50, bool hz10)
 {
-    canSend(packet_buffer[8]);
-    canSend(packet_buffer[9]);
-}
-
-void sendPackets50Hz()
-{
-    canSend(packet_buffer[3]);
-    canSend(packet_buffer[5]);
-    canSend(packet_buffer[6]);
-}
-
-void sendPackets10Hz()
-{
-    canSend(packet_buffer[0]);
-    canSend(packet_buffer[1]);
-    canSend(packet_buffer[2]);
-    canSend(packet_buffer[4]);
-    canSend(packet_buffer[7]);
+    if (hz10)
+    {
+        canSend(packet_buffer[0]); // unsure
+        canSend(packet_buffer[1]); // unsure
+        canSend(packet_buffer[2]); // unsure
+    }
+    if (hz50)
+    {
+        canSend(packet_buffer[3]);
+    }
+    if (hz10)
+    {
+        canSend(packet_buffer[4]); // unsure
+    }
+    if (hz50)
+    {
+        canSend(packet_buffer[5]);
+        canSend(packet_buffer[6]);
+    }
+    if (hz10)
+    {
+        canSend(packet_buffer[7]);
+    }
+    if (hz100)
+    {
+        canSend(packet_buffer[8]);
+        canSend(packet_buffer[9]);
+    }
 }
 
 void updateLights()
@@ -528,20 +538,22 @@ void setup()
 void loop()
 {
     const unsigned long us = micros();
+    bool hz100 = false, hz50 = false, hz10 = false;
     if ((us - micros_timer_100hz) >= 10000) // 10ms / 100Hz
     {
-        sendPackets100Hz();
+        hz100 = true;
         micros_timer_100hz += 10000;
     }
     if ((us - micros_timer_50hz) >= 20000) // 20ms / 50Hz
     {
-        sendPackets50Hz();
+        hz50 = true;
         micros_timer_50hz += 20000;
     }
     if ((us - micros_timer_10hz) >= 100000) // 100ms / 10Hz
     {
-        sendPackets10Hz();
+        hz10 = true;
         micros_timer_10hz += 100000;
     }
+    sendPackets(hz100, hz50, hz10);
     processSerialCommand();
 }
