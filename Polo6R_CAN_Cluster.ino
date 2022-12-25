@@ -51,31 +51,29 @@ struct DashboardSettings
 {
     unsigned short speed = 0; // speed [km/h]
     unsigned short rpm = 0;   // revs [rpm]
-    bool backlight = true;    // dashboard backlight (off/on)
-    byte turning_lights =
-        0;                          // turning lights (0: off, 1: left, 2: right, 3: both)
-    bool abs = false;               // ABS lamp (on/off)
-    bool traction_control = false;  // traction control lamp (on/off)
-    bool handbrake = false;         // handbrake lamp (on/off)
-    bool parking_brake = false;     // parking brake lamp (on/off)
-    bool low_tire_pressure = false; // low tire pressure lamp (on/off)
-    bool door_open_warning = false; // open door warning lamp (on/off)
+    bool backlight = true;    // dashboard backlight (on/off)
     bool clutch_control =
         false; // display clutch message on dashboard display (on/off)
     bool check_lamp =
-        false;                       // display 'check lamp' message on dashboard display (on/off)
-    bool trunk_open_warning = false; // open trunk warning lamp (on/off)
-    bool battery_warning = false;    // battery warning lamp (on/off)
+        false; // display 'check lamp' message on dashboard display (on/off)
     bool key_battery_warning =
-        false;                      // display 'key battery low' message on dashboard display. probably
-                                    // works only at start (on/off)
-    bool fog_light = false;         // fog light lamp (on/off)
-    bool high_beam = false;         // high beam lamp (on/off)
-    bool seat_belt_warning = false; // seat belt warning lamp (on/off)
-    bool preheating = false;        // diesel preheating lamp (on/off)
-    bool high_water_temp = false;   // high water temperature lamp (on/off) AVOID IT
-                                    // PLEASE, BEEPS AWFULLY LOUD
-    bool dpf_warning = false;       // DPF warning lamp (on/off)
+        false;                       // display 'key battery low' message on dashboard display (on/off). probably works only at start
+    bool seat_belt_warning = false;  // seat belt warning lamp (on/off)
+    bool door_open_warning = false;  // open door warning lamp (on/off)
+    bool trunk_open_warning = false; // open trunk warning lamp (on/off)
+    bool parking_brake = false;      // parking brake lamp (on/off)
+    bool high_water_temp = false;    // high water temperature lamp (on/off) AVOID IT PLEASE, IT'S VERY LOUD
+    bool dpf_warning = false;        // DPF warning lamp (on/off)
+    bool preheating = false;         // diesel preheating lamp (on/off)
+    bool battery_warning = false;    // battery warning lamp (on/off)
+    bool fog_light = false;          // fog light lamp (on/off)
+    bool high_beam = false;          // high beam lamp (on/off)
+    bool turn_left = false;          // left turn indicator (on/off)
+    bool turn_right = false;         // right turn indicator (on/off)
+    bool abs = false;                // ABS lamp (on/off)
+    bool traction_control = false;   // traction control lamp (on/off)
+    bool handbrake = false;          // handbrake lamp (on/off)
+    bool low_tire_pressure = false;  // low tire pressure lamp (on/off)
 };
 
 struct CanPacket
@@ -99,7 +97,6 @@ struct CanPacket
 };
 
 unsigned long micros_timer_100hz = 0, micros_timer_50hz = 0, micros_timer_10hz = 0, micros_timer_5hz = 0;
-unsigned long seconds_timer = 0;
 
 namespace Packets
 {
@@ -146,7 +143,7 @@ void preparePackets()
     // ABS2: doesn't affect the dashboard?
     Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
 
-    fillPacketBufferAndUpdatePins();
+    resetEverything();
 }
 
 void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
@@ -172,81 +169,55 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
     }
 }
 
-void updateLights()
-{
-    auto &lights = Packets::lights.data;
-    lights[0] = dashboard.turning_lights & 0x03;
-    if (dashboard.battery_warning)
-    {
-        lights[0] |= 0x80;
+#define SET_BIT(byte_value, state, bitmask) \
+    if (state)                              \
+    {                                       \
+        byte_value |= bitmask;              \
+    }                                       \
+    else                                    \
+    {                                       \
+        byte_value &= ~bitmask;             \
     }
-    lights[1] = 0;
-    if (dashboard.door_open_warning)
-    {
-        lights[1] |= 0x01;
-    }
-    if (dashboard.trunk_open_warning)
-    {
-        lights[1] |= 0x20;
-    }
-    lights[2] = 0;
-    if (dashboard.backlight)
-    {
-        lights[2] |= 0x01;
-    }
-    lights[4] = 0;
-    if (dashboard.clutch_control)
-    {
-        lights[4] |= 0x01;
-    }
-    if (dashboard.check_lamp)
-    {
-        lights[4] |= 0x10;
-    }
-    lights[5] = 0;
-    if (dashboard.key_battery_warning)
-    {
-        lights[5] |= 0x80;
-    }
-    lights[7] = 0;
-    if (dashboard.fog_light)
-    {
-        lights[7] |= 0x20;
-    }
-    if (dashboard.high_beam)
-    {
-        lights[7] |= 0x40;
-    }
-}
 
-void updateEngineControl()
-{
-    auto &engine_control = Packets::engine_control.data;
-    engine_control[1] = 0;
-    if (dashboard.preheating)
-    {
-        engine_control[1] |= 0x02;
+#define BIT_SETTER(setter_name, variable_name, packet, byte_index, bitmask) \
+    inline void setter_name(bool on = dashboard.variable_name)              \
+    {                                                                       \
+        dashboard.variable_name = on;                                       \
+        SET_BIT(Packets::packet.data[byte_index], on, bitmask);             \
     }
-    if (dashboard.high_water_temp)
-    {
-        engine_control[1] |= 0x10;
-    }
-    engine_control[5] = 0;
-    if (dashboard.dpf_warning)
-    {
-        engine_control[5] = 0x02;
-    }
-}
 
-void updateRpm()
-{
-    const unsigned short rpm = dashboard.rpm * 4;
-    Packets::rpm.data[2] = rpm & 0xFF;
-    Packets::rpm.data[3] = (rpm >> 8) & 0xFF;
-}
+#define DUAL_BIT_SETTER(setter_name, variable_name, packet1, byte_index1, bitmask1, packet2, byte_index2, bitmask2) \
+    inline void setter_name(bool on = dashboard.variable_name)                                                      \
+    {                                                                                                               \
+        dashboard.variable_name = on;                                                                               \
+        SET_BIT(Packets::packet1.data[byte_index1], on, bitmask1);                                                  \
+        SET_BIT(Packets::packet2.data[byte_index2], on, bitmask2);                                                  \
+    }
 
-void updateMotor()
+#define BIT_PIN_SETTER(setter_name, variable_name, packet, byte_index, bitmask, pin) \
+    inline void setter_name(bool on = dashboard.variable_name)                       \
+    {                                                                                \
+        dashboard.variable_name = on;                                                \
+        SET_BIT(Packets::packet.data[byte_index], on, bitmask);                      \
+        digitalWrite(pin, on ? HIGH : LOW);                                          \
+    }
+#define PIN_SETTER(setter_name, variable_name, pin)            \
+    inline void setter_name(bool on = dashboard.variable_name) \
+    {                                                          \
+        dashboard.variable_name = on;                          \
+        digitalWrite(pin, on ? HIGH : LOW);                    \
+    }
+
+#define INVERTED_PIN_SETTER(setter_name, variable_name, pin)   \
+    inline void setter_name(bool on = dashboard.variable_name) \
+    {                                                          \
+        dashboard.variable_name = on;                          \
+        digitalWrite(pin, on ? LOW : HIGH);                    \
+    }
+
+inline void setSpeed(unsigned short speed = dashboard.speed)
 {
+    dashboard.speed = speed;
     const int speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
     const byte speed_low = speed_prescaled & 0xFF,
@@ -259,32 +230,9 @@ void updateMotor()
     const byte abs_speed15_low = (speed_prescaled << 1) & 0xFF,
                abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
 
-    Packets::airbag.data[2] = dashboard.seat_belt_warning ? 0x04 : 0;
-
-    // suggested in DAF--MAN-CAN-JAN's comment in https://www.youtube.com/watch?v=9Ret4IUi3sU
-    // but it seems wrong?
-    // SEE: https://github.com/mygithubadel/vag-can-bus-gauge-cluster-controller/blob/main/vw_canbus_outgauge_nodemcu.ino
     auto &esp = Packets::esp.data;
     esp[1] = speed_low;
     esp[2] = speed_high;
-    esp[3] = 0;
-    if (dashboard.abs)
-    {
-        esp[3] |= 0x01;
-    }
-    if (dashboard.traction_control)
-    {
-        esp[3] |= 0x02;
-    }
-    if (dashboard.handbrake)
-    {
-        esp[3] |= 0x04;
-    }
-    if (dashboard.low_tire_pressure)
-    {
-        esp[3] |= 0x08;
-    }
-    esp[5] = 0xFF;
 
     auto &motor_speed = Packets::motor_speed.data;
     motor_speed[3] = abs_speed_low;
@@ -292,29 +240,10 @@ void updateMotor()
     motor_speed[5] = abs_speed_low;
     motor_speed[6] = abs_speed_high;
 
-    // speed and drive mode
     auto &drive = Packets::drive_mode.data;
     drive[1] = speed_low;
     drive[2] = speed_high;
-    drive[3] = 0; // same as packet_buffer[4].data[3]?
-    if (dashboard.abs)
-    {
-        drive[3] |= 0x01;
-    }
-    if (dashboard.traction_control)
-    {
-        drive[3] |= 0x02;
-    }
-    if (dashboard.handbrake)
-    {
-        drive[3] |= 0x04;
-    }
-    if (dashboard.low_tire_pressure)
-    {
-        drive[3] |= 0x08;
-    }
 
-    // ABS1: has to be sent to apply the speed, though it can all be zeros?
     auto &abs1 = Packets::abs1.data;
     abs1[1] = 0xA0;
     if (dashboard.abs)
@@ -324,7 +253,6 @@ void updateMotor()
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
 
-    // ABS2: doesn't affect the dashboard?
     auto &abs2 = Packets::abs2.data;
     abs2[0] = abs_speed15_low;
     abs2[1] = abs_speed15_high;
@@ -336,37 +264,59 @@ void updateMotor()
     abs2[7] = abs_speed15_high;
 }
 
-inline void fillPacketBufferAndUpdatePins()
+inline void setRPM(unsigned short rpm = dashboard.rpm)
 {
-    updateLights();
-    updateEngineControl();
-    updateRpm();
-    updateMotor();
-    updatePins();
+    dashboard.rpm = rpm;
+    const unsigned short rpm_prescaled = rpm * 4;
+    Packets::rpm.data[2] = rpm_prescaled & 0xFF;
+    Packets::rpm.data[3] = (rpm_prescaled >> 8) & 0xFF;
 }
 
-inline void updateFogLight()
-{
-    digitalWrite(FOG_LIGHT_INDICATOR_PIN, dashboard.fog_light ? HIGH : LOW);
-    updateLights();
-}
+BIT_SETTER(setBacklight, backlight, lights, 2, 0x01)
+BIT_SETTER(setClutchControl, clutch_control, lights, 4, 0x01)
+BIT_SETTER(setCheckLamp, check_lamp, lights, 4, 0x10)
+BIT_SETTER(setKeyBatteryWarning, key_battery_warning, lights, 5, 0x80)
+BIT_SETTER(setSeatBeltWarning, seat_belt_warning, airbag, 2, 0x04)
+BIT_SETTER(setDoorOpenWarning, door_open_warning, lights, 1, 0x01)
+BIT_SETTER(setTrunkOpenWarning, trunk_open_warning, lights, 1, 0x20)
+INVERTED_PIN_SETTER(setParkingBrake, parking_brake, PARKING_BRAKE_CONTROL_PIN)
+BIT_SETTER(setHighWaterTemp, high_water_temp, engine_control, 1, 0x01)
+BIT_SETTER(setDPFWarning, dpf_warning, engine_control, 5, 0x02)
+BIT_SETTER(setPreheating, preheating, engine_control, 1, 0x02)
+BIT_SETTER(setBatteryWarning, battery_warning, lights, 0, 0x80)
+BIT_PIN_SETTER(setFogLight, fog_light, lights, 7, 0x20, FOG_LIGHT_INDICATOR_PIN)
+BIT_PIN_SETTER(setHighBeam, high_beam, lights, 7, 0x40, HIGH_BEAM_INDICATOR_PIN)
+BIT_SETTER(setTurnLeft, turn_left, lights, 0, 0x01)
+BIT_SETTER(setTurnRight, turn_right, lights, 0, 0x02)
+DUAL_BIT_SETTER(setABS, abs, esp, 3, 0x01, drive_mode, 3, 0x01)
+DUAL_BIT_SETTER(setTractionControl, traction_control, esp, 3, 0x02, drive_mode, 3, 0x02)
+DUAL_BIT_SETTER(setHandbrake, handbrake, esp, 3, 0x04, drive_mode, 3, 0x04)
+DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode, 3, 0x08)
 
-inline void updateHighBeam()
+inline void resetEverything()
 {
-    digitalWrite(HIGH_BEAM_INDICATOR_PIN, dashboard.high_beam ? HIGH : LOW);
-    updateLights();
-}
-
-inline void updateParkingBrake()
-{
-    digitalWrite(PARKING_BRAKE_CONTROL_PIN, dashboard.parking_brake ? LOW : HIGH);
-}
-
-inline void updatePins()
-{
-    updateFogLight();
-    updateHighBeam();
-    updateParkingBrake();
+    setSpeed();
+    setRPM();
+    setBacklight();
+    setClutchControl();
+    setCheckLamp();
+    setKeyBatteryWarning();
+    setSeatBeltWarning();
+    setDoorOpenWarning();
+    setTrunkOpenWarning();
+    setParkingBrake();
+    setHighWaterTemp();
+    setDPFWarning();
+    setPreheating();
+    setBatteryWarning();
+    setFogLight();
+    setHighBeam();
+    setTurnLeft();
+    setTurnRight();
+    setABS();
+    setTractionControl();
+    setHandbrake();
+    setLowTirePressure();
 }
 
 inline int str2int(const char *str, int len)
@@ -405,46 +355,7 @@ bool processSerialCommand()
     --len;
     switch (serial_buffer[0])
     {
-    case 'A': // pause (bool)
-        dashboard.trunk_open_warning = dashboard.door_open_warning =
-            serial_buffer[1] == '1';
-        updateLights();
-        break;
-    case 'B': // rpm:max_rpm (int)
-    {
-        const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
-        if (separator_index == 0)
-        {
-            break;
-        }
-        const bool no_max_rpm =
-            separator_index == (len - 1) || separator_index == -1;
-        int rpm = str2int(serial_buffer + 1,
-                          (separator_index == -1) ? len : separator_index);
-#ifdef RESCALE_RPM
-        if (!no_max_rpm)
-        {
-            const int max_rpm = str2int(serial_buffer + 2 + separator_index,
-                                        len - separator_index - 1);
-            if (max_rpm != 0)
-            {
-                rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
-            }
-        }
-#endif
-        if (rpm > MAX_RPM)
-        {
-            rpm = MAX_RPM;
-        }
-        else if (rpm < 0)
-        {
-            rpm = 0;
-        }
-        dashboard.rpm = rpm;
-        updateRpm();
-        break;
-    }
-    case 'C': // speed:max_speed (int)
+    case 'A': // speed[:max_speed] (int)
     {
         const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
         if (separator_index == 0)
@@ -474,77 +385,101 @@ bool processSerialCommand()
         {
             speed = 0;
         }
-        dashboard.speed = speed;
-        updateMotor();
+        setSpeed(speed);
         break;
     }
-    case 'D': // abs (bool)
-        dashboard.abs = serial_buffer[1] == '1';
-        updateMotor();
-        break;
-    case 'E': // handbrake (bool)
-        dashboard.handbrake = serial_buffer[1] == '1';
-        updateMotor();
-        break;
-    case 'F': // parking_brake (bool)
-        dashboard.parking_brake = serial_buffer[1] == '1';
-        updateParkingBrake();
-        break;
-    case 'G': // turn_left (bool)
+    case 'B': // rpm[:max_rpm] (int)
     {
-        bool turn_left = serial_buffer[1] == '1';
-        bool turn_right = dashboard.turning_lights & 0x02;
-        if (turn_left)
+        const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
+        if (separator_index == 0)
         {
-            dashboard.turning_lights = turn_right ? 3 : 1;
+            break;
         }
-        else
+        const bool no_max_rpm =
+            separator_index == (len - 1) || separator_index == -1;
+        int rpm = str2int(serial_buffer + 1,
+                          (separator_index == -1) ? len : separator_index);
+#ifdef RESCALE_RPM
+        if (!no_max_rpm)
         {
-            dashboard.turning_lights = turn_right ? 2 : 0;
+            const int max_rpm = str2int(serial_buffer + 2 + separator_index,
+                                        len - separator_index - 1);
+            if (max_rpm != 0)
+            {
+                rpm = map(rpm, 0, max_rpm, 0, MAX_RPM);
+            }
         }
-        updateLights();
+#endif
+        if (rpm > MAX_RPM)
+        {
+            rpm = MAX_RPM;
+        }
+        else if (rpm < 0)
+        {
+            rpm = 0;
+        }
+        setRPM(rpm);
         break;
     }
-    case 'H': // turn_right (bool)
-    {
-        bool turn_left = dashboard.turning_lights & 0x01;
-        bool turn_right = serial_buffer[1] == '1';
-        if (turn_left)
-        {
-            dashboard.turning_lights = turn_right ? 3 : 1;
-        }
-        else
-        {
-            dashboard.turning_lights = turn_right ? 2 : 0;
-        }
-        updateLights();
+    case 'C': // Backlight (bool)
+        setBacklight(serial_buffer[1] == '1');
         break;
-    }
-    case 'I': // high_beam (bool)
-        dashboard.high_beam = serial_buffer[1] == '1';
-        updateHighBeam();
+    case 'D': // Clutch control warning (bool)
+        setClutchControl(serial_buffer[1] == '1');
         break;
-    case 'J': // battery_voltage (bool)
-        dashboard.battery_warning = serial_buffer[1] == '1';
-        updateLights();
+    case 'E': // Check lamp message (bool)
+        setCheckLamp(serial_buffer[1] == '1');
         break;
-    case 'K': // water_temperature (bool)
-        dashboard.high_water_temp =
-            serial_buffer[1] == '1'; // loud AF, don't use it please
-        updateEngineControl();
+    case 'F': // Key battery warning (bool)
+        setKeyBatteryWarning(serial_buffer[1] == '1');
         break;
-    case 'L': // backlight (bool)
-        dashboard.backlight = serial_buffer[1] ==
-                              '1'; // I prefer it with backlight being always on!
-        updateLights();
+    case 'G': // Seat belt warning (bool)
+        setSeatBeltWarning(serial_buffer[1] == '1');
         break;
-    case 'M': // traction control (bool)
-        dashboard.traction_control = serial_buffer[1] == '1';
-        updateMotor();
+    case 'H': // Door open warning (bool)
+        setDoorOpenWarning(serial_buffer[1] == '1');
         break;
-    case 'N': // low tire pressure (bool)
-        dashboard.low_tire_pressure = serial_buffer[1] == '1';
-        updateMotor();
+    case 'I': // Trunk open warning (bool)
+        setTrunkOpenWarning(serial_buffer[1] == '1');
+        break;
+    case 'J': // Parking brake (bool)
+        setParkingBrake(serial_buffer[1] == '1');
+        break;
+    case 'K': // High water temperature (bool)
+        setHighWaterTemp(serial_buffer[1] == '1');
+        break;
+    case 'L': // DPF warning (bool)
+        setDPFWarning(serial_buffer[1] == '1');
+        break;
+    case 'M': // Preheating (bool)
+        setPreheating(serial_buffer[1] == '1');
+        break;
+    case 'N': // Battery warning (bool)
+        setBatteryWarning(serial_buffer[1] == '1');
+        break;
+    case 'O': // Fog light (bool)
+        setFogLight(serial_buffer[1] == '1');
+        break;
+    case 'P': // High beam (bool)
+        setHighBeam(serial_buffer[1] == '1');
+        break;
+    case 'Q': // Left turn indicator (bool)
+        setTurnLeft(serial_buffer[1] == '1');
+        break;
+    case 'R': // Right turn indicator (bool)
+        setTurnRight(serial_buffer[1] == '1');
+        break;
+    case 'S': // ABS (bool)
+        setABS(serial_buffer[1] == '1');
+        break;
+    case 'T': // Traction control (bool)
+        setTractionControl(serial_buffer[1] == '1');
+        break;
+    case 'U': // Handbrake (bool)
+        setHandbrake(serial_buffer[1] == '1');
+        break;
+    case 'V': // Low tire pressure (bool)
+        setLowTirePressure(serial_buffer[1] == '1');
         break;
     default:
         break;
@@ -570,7 +505,7 @@ void setup()
     Serial.println("CAN initialized!");
     can.setMode(MCP_NORMAL);
     preparePackets();
-    micros_timer_10hz = micros_timer_50hz = micros_timer_100hz = micros();
+    micros_timer_5hz = micros_timer_10hz = micros_timer_50hz = micros_timer_100hz = micros();
 }
 
 void loop()
