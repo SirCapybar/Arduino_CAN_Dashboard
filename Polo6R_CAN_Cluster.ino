@@ -51,11 +51,11 @@ struct DashboardSettings
 {
     unsigned short speed = 0; // speed [km/h]
     unsigned short rpm = 0;   // revs [rpm]
-    bool backlight = false;   // dashboard backlight (off/on)
+    bool backlight = true;    // dashboard backlight (off/on)
     byte turning_lights =
         0;                          // turning lights (0: off, 1: left, 2: right, 3: both)
     bool abs = false;               // ABS lamp (on/off)
-    bool offroad = false;           // offroad lamp (on/off)
+    bool traction_control = false;  // traction control lamp (on/off)
     bool handbrake = false;         // handbrake lamp (on/off)
     bool parking_brake = false;     // parking brake lamp (on/off)
     bool low_tire_pressure = false; // low tire pressure lamp (on/off)
@@ -65,7 +65,7 @@ struct DashboardSettings
     bool check_lamp =
         false;                       // display 'check lamp' message on dashboard display (on/off)
     bool trunk_open_warning = false; // open trunk warning lamp (on/off)
-    bool battery_warning = true;     // battery warning lamp (on/off)
+    bool battery_warning = false;    // battery warning lamp (on/off)
     bool key_battery_warning =
         false;                      // display 'key battery low' message on dashboard display. probably
                                     // works only at start (on/off)
@@ -98,9 +98,22 @@ struct CanPacket
     }
 };
 
-unsigned long micros_timer_100hz = 0, micros_timer_50hz = 0, micros_timer_10hz = 0;
+unsigned long micros_timer_100hz = 0, micros_timer_50hz = 0, micros_timer_10hz = 0, micros_timer_5hz = 0;
+unsigned long seconds_timer = 0;
 
-CanPacket packet_buffer[10];
+namespace Packets
+{
+    CanPacket immobilizer;
+    CanPacket lights;
+    CanPacket engine_control;
+    CanPacket airbag; // airbag and seat belt info
+    CanPacket esp;    // engine and ESP
+    CanPacket motor_speed;
+    CanPacket rpm;
+    CanPacket drive_mode;
+    CanPacket abs1;
+    CanPacket abs2;
+}
 
 const size_t SERIAL_BUFFER_SIZE = 64;
 char serial_buffer[SERIAL_BUFFER_SIZE];
@@ -118,65 +131,50 @@ void preparePackets()
     // for frequencies see https://christian-rossow.de/publications/vatican-ches2016.pdf
     // possibly correct?
 
-    // immobilizer
-    packet_buffer[0] = CanPacket(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
-    // lights
-    packet_buffer[1] = CanPacket(0x470, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
-    // engine control
-    packet_buffer[2] = CanPacket(0x480, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
-    // airbag and seat belt info
-    packet_buffer[3] = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0); // 20ms / 50Hz
-    // engine on and ESP
-    packet_buffer[4] = CanPacket(0xDA0, 0x01, 0x80, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    Packets::immobilizer = CanPacket(0x3D0, 0, 0x80, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    Packets::lights = CanPacket(0x470, 0, 0, 0, 0, 0, 0, 0, 0);         // unknown, possibly 100ms / 10Hz
+    Packets::engine_control = CanPacket(0x480, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
+    Packets::airbag = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0);      // 20ms / 50Hz
+    Packets::esp = CanPacket(0xDA0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD);      // unknown, possibly 100ms / 10Hz
     // motor speed? doesn't affect the dashboard at all
-    packet_buffer[5] = CanPacket(0x320, 0x04, 0, 0x40, 0, 0, 0, 0, 0); // 20ms / 50Hz
-    // rpm
-    packet_buffer[6] = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0, 0, 0, 0); // 20ms / 50Hz
+    Packets::motor_speed = CanPacket(0x320, 0x04, 0, 0x40, 0, 0, 0, 0, 0);  // 20ms / 50Hz
+    Packets::rpm = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0x0E, 0, 0x1B, 0x0E); // 20ms / 50Hz
     // speed, drivemode, potentially mileage
-    packet_buffer[7] = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
-    // ABS1: has to be sent to apply the speed, though it can all be zeros?
-    packet_buffer[8] = CanPacket(0x1A0, 0, 0x18, 0, 0, 0xFE, 0xFE, 0, 0x00); // 10ms / 100Hz
+    Packets::drive_mode = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
+    // ABS1: has to be sent to apply the speed?
+    Packets::abs1 = CanPacket(0x1A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     // ABS2: doesn't affect the dashboard?
-    packet_buffer[9] = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
+    Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
 
     fillPacketBufferAndUpdatePins();
 }
 
-void sendPackets(bool hz100, bool hz50, bool hz10)
+void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
 {
-    if (hz10)
-    {
-        canSend(packet_buffer[0]); // unsure
-        canSend(packet_buffer[1]); // unsure
-        canSend(packet_buffer[2]); // unsure
-    }
-    if (hz50)
-    {
-        canSend(packet_buffer[3]);
-    }
-    if (hz10)
-    {
-        canSend(packet_buffer[4]); // unsure
-    }
-    if (hz50)
-    {
-        canSend(packet_buffer[5]);
-        canSend(packet_buffer[6]);
-    }
-    if (hz10)
-    {
-        canSend(packet_buffer[7]);
-    }
     if (hz100)
     {
-        canSend(packet_buffer[8]);
-        canSend(packet_buffer[9]);
+        canSend(Packets::immobilizer);
+        canSend(Packets::engine_control);
+        canSend(Packets::rpm);
+        canSend(Packets::airbag);
+        canSend(Packets::esp);
+        canSend(Packets::abs1);
+        canSend(Packets::abs2);
+        canSend(Packets::lights);
+    }
+    if (hz50)
+    {
+        canSend(Packets::motor_speed);
+    }
+    if (hz10)
+    {
+        canSend(Packets::drive_mode);
     }
 }
 
 void updateLights()
 {
-    auto &lights = packet_buffer[1].data;
+    auto &lights = Packets::lights.data;
     lights[0] = dashboard.turning_lights & 0x03;
     if (dashboard.battery_warning)
     {
@@ -223,7 +221,7 @@ void updateLights()
 
 void updateEngineControl()
 {
-    auto &engine_control = packet_buffer[2].data;
+    auto &engine_control = Packets::engine_control.data;
     engine_control[1] = 0;
     if (dashboard.preheating)
     {
@@ -242,43 +240,68 @@ void updateEngineControl()
 
 void updateRpm()
 {
-    unsigned short rpm = dashboard.rpm * 4;
-    packet_buffer[6].data[2] = rpm & 0xFF;
-    packet_buffer[6].data[3] = (rpm >> 8) & 0xFF;
+    const unsigned short rpm = dashboard.rpm * 4;
+    Packets::rpm.data[2] = rpm & 0xFF;
+    Packets::rpm.data[3] = (rpm >> 8) & 0xFF;
 }
 
 void updateMotor()
 {
-    int speed_prescaled =
+    const int speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
-    byte speed_low = speed_prescaled & 0xFF,
-         speed_high = (speed_prescaled >> 8) & 0xFF;
+    const byte speed_low = speed_prescaled & 0xFF,
+               speed_high = (speed_prescaled >> 8) & 0xFF;
 
-    int abs_speed_prescaled =
+    const int abs_speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.01f);
-    byte abs_speed_low = speed_prescaled & 0xFF,
-         abs_speed_high = (speed_prescaled >> 8) & 0xFF;
-    byte abs_speed15_low = (speed_prescaled << 1) & 0xFF,
-         abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
+    const byte abs_speed_low = speed_prescaled & 0xFF,
+               abs_speed_high = (speed_prescaled >> 8) & 0xFF;
+    const byte abs_speed15_low = (speed_prescaled << 1) & 0xFF,
+               abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
 
-    packet_buffer[3].data[2] = dashboard.seat_belt_warning ? 0x04 : 0;
+    Packets::airbag.data[2] = dashboard.seat_belt_warning ? 0x04 : 0;
 
-    auto &motor_speed = packet_buffer[5].data;
+    // suggested in DAF--MAN-CAN-JAN's comment in https://www.youtube.com/watch?v=9Ret4IUi3sU
+    // but it seems wrong?
+    // SEE: https://github.com/mygithubadel/vag-can-bus-gauge-cluster-controller/blob/main/vw_canbus_outgauge_nodemcu.ino
+    auto &esp = Packets::esp.data;
+    esp[1] = speed_low;
+    esp[2] = speed_high;
+    esp[3] = 0;
+    if (dashboard.abs)
+    {
+        esp[3] |= 0x01;
+    }
+    if (dashboard.traction_control)
+    {
+        esp[3] |= 0x02;
+    }
+    if (dashboard.handbrake)
+    {
+        esp[3] |= 0x04;
+    }
+    if (dashboard.low_tire_pressure)
+    {
+        esp[3] |= 0x08;
+    }
+    esp[5] = 0xFF;
+
+    auto &motor_speed = Packets::motor_speed.data;
     motor_speed[3] = abs_speed_low;
     motor_speed[4] = abs_speed_high;
     motor_speed[5] = abs_speed_low;
     motor_speed[6] = abs_speed_high;
 
     // speed and drive mode
-    auto &drive = packet_buffer[7].data;
+    auto &drive = Packets::drive_mode.data;
     drive[1] = speed_low;
     drive[2] = speed_high;
-    drive[3] = 0;
+    drive[3] = 0; // same as packet_buffer[4].data[3]?
     if (dashboard.abs)
     {
         drive[3] |= 0x01;
     }
-    if (dashboard.offroad)
+    if (dashboard.traction_control)
     {
         drive[3] |= 0x02;
     }
@@ -292,12 +315,17 @@ void updateMotor()
     }
 
     // ABS1: has to be sent to apply the speed, though it can all be zeros?
-    auto &abs1 = packet_buffer[8].data;
+    auto &abs1 = Packets::abs1.data;
+    abs1[1] = 0xA0;
+    if (dashboard.abs)
+    {
+        abs1[1] |= 0x01;
+    }
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
 
     // ABS2: doesn't affect the dashboard?
-    auto &abs2 = packet_buffer[9].data;
+    auto &abs2 = Packets::abs2.data;
     abs2[0] = abs_speed15_low;
     abs2[1] = abs_speed15_high;
     abs2[2] = abs_speed15_low;
@@ -320,11 +348,13 @@ inline void fillPacketBufferAndUpdatePins()
 inline void updateFogLight()
 {
     digitalWrite(FOG_LIGHT_INDICATOR_PIN, dashboard.fog_light ? HIGH : LOW);
+    updateLights();
 }
 
 inline void updateHighBeam()
 {
     digitalWrite(HIGH_BEAM_INDICATOR_PIN, dashboard.high_beam ? HIGH : LOW);
+    updateLights();
 }
 
 inline void updateParkingBrake()
@@ -508,6 +538,14 @@ bool processSerialCommand()
                               '1'; // I prefer it with backlight being always on!
         updateLights();
         break;
+    case 'M': // traction control (bool)
+        dashboard.traction_control = serial_buffer[1] == '1';
+        updateMotor();
+        break;
+    case 'N': // low tire pressure (bool)
+        dashboard.low_tire_pressure = serial_buffer[1] == '1';
+        updateMotor();
+        break;
     default:
         break;
     }
@@ -538,7 +576,7 @@ void setup()
 void loop()
 {
     const unsigned long us = micros();
-    bool hz100 = false, hz50 = false, hz10 = false;
+    bool hz100 = false, hz50 = false, hz10 = false, hz5 = false;
     if ((us - micros_timer_100hz) >= 10000) // 10ms / 100Hz
     {
         hz100 = true;
@@ -554,6 +592,11 @@ void loop()
         hz10 = true;
         micros_timer_10hz += 100000;
     }
-    sendPackets(hz100, hz50, hz10);
+    if ((us - micros_timer_5hz) >= 200000) // 200ms / 5Hz
+    {
+        hz5 = true;
+        micros_timer_5hz += 200000;
+    }
+    sendPackets(hz100, hz50, hz10, hz5);
     processSerialCommand();
 }
