@@ -1,20 +1,103 @@
 {
   "AutomaticReconnect": true,
-  "SerialPortName": "COM5",
+  "SerialPortName": "COM6",
   "StartupDelayMs": 1000,
   "IsConnecting": false,
-  "IsEnabled": false,
+  "IsEnabled": true,
   "LogIncomingData": true,
   "IsConnected": false,
   "BaudRate": 115200,
   "UpdateMessages": [
     {
       "Message": {
-        "Expression": "'X'+if([DataCorePlugin.GamePaused], '1', '0') + ';' +\r\nround([Rpms], 0) + ';' +\r\nround([MaxRpm], 0) + ';' +\r\nround([SpeedKmh], 0) + ';' +\r\nround([MaxSpeedKmh], 0) + ';' +\r\nif([ABSActive], '1', '0') + ';' +\r\nif([Handbrake], '1', '0') + ';' +\r\nif([GameRawData.TruckValues.CurrentValues.MotorValues.BrakeValues.ParkingBrake], '1', '0') + ';' +\r\nif([TurnIndicatorLeft], '1', '0') + ';' +\r\nif([TurnIndicatorRight], '1', '0') + ';' +\r\nif([GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh], '1', '0') + ';' +\r\nif([GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.BatteryVoltage], '1', '0') + ';' +\r\nif([GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.WaterTemperature], '1', '0') + ';' +\r\nif([GameRawData.TruckValues.CurrentValues.LightsValues.DashboardBacklight], '1', '0') + ';'",
+        "Expression": "if([DataCorePlugin.GamePaused], 'G1;H1;I1;', 'G0;H0;I0;')",
         "SimpleOperationProp": null
       },
       "IsEnabled": true,
-      "MaximumFrequency": 10
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'B' + round([Rpms], 0) + if([MaxRpm] and [DataCorePlugin.CurrentGame] != 'BeamNg', ':' + round([MaxRpm], 0), '') + ';'",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "'A' + round([SpeedKmh], 0) + ';'",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Interpreter": 1,
+        "Expression": "var DL_HANDBRAKE = 4\r\nreturn $prop('Handbrake') || $prop('GameRawData.ShowLights') & DL_HANDBRAKE ? 'U1;' : 'U0;'",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Interpreter": 1,
+        "Expression": "var DL_ABS = 1024\r\nreturn $prop('GameRawData.ShowLights') & DL_ABS ? 'S1;' : 'S0;'",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([GameRawData.TractionControl], 'T1;', 'T0;')",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([TurnIndicatorLeft], 'Q1;', 'Q0;')",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([TurnIndicatorRight], 'R1;', 'R0;')",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([EngineStarted], 'N0;', 'N1;')",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Interpreter": 1,
+        "Expression": "var DL_FULLBEAM = 2\r\nreturn $prop('GameRawData.ShowLights') & DL_FULLBEAM || $prop('GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh') ? 'P1;' : 'P0;'",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([GameRawData.TruckValues.CurrentValues.MotorValues.BrakeValues.ParkingBrake], 'J1;','J0;')",
+        "SimpleOperationProp": null
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
     }
   ],
   "OnConnectMessage": {
