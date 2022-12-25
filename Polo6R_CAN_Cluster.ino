@@ -112,8 +112,8 @@ namespace Packets
     CanPacket abs2;
 }
 
-const size_t SERIAL_BUFFER_SIZE = 64;
-char serial_buffer[SERIAL_BUFFER_SIZE];
+const size_t SERIAL_BUFF_SIZE = 64;
+char serial_buffer[SERIAL_BUFF_SIZE];
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
@@ -347,29 +347,31 @@ bool processSerialCommand()
     {
         return false;
     }
-    int len = Serial.readBytesUntil(MSG_DELIMITER, serial_buffer, SERIAL_BUFFER_SIZE);
+    int len = Serial.readBytesUntil(MSG_DELIMITER, serial_buffer, SERIAL_BUFF_SIZE);
     if (len < 2)
     {
         return true;
     }
+    const char header = serial_buffer[0];
+    char *buffer = serial_buffer + 1;
     --len;
-    switch (serial_buffer[0])
+    switch (header)
     {
     case 'A': // speed[:max_speed] (int)
     {
-        const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
+        const int separator_index = getSeparatorIndex(buffer, len);
         if (separator_index == 0)
         {
             break;
         }
         const bool no_max_speed =
             separator_index == (len - 1) || separator_index == -1;
-        int speed = str2int(serial_buffer + 1,
+        int speed = str2int(buffer,
                             (separator_index == -1) ? len : separator_index);
 #ifdef RESCALE_KMH
         if (!no_max_speed)
         {
-            const int max_speed = str2int(serial_buffer + 2 + separator_index,
+            const int max_speed = str2int(buffer + separator_index + 1,
                                           len - separator_index - 1);
             if (max_speed != 0)
             {
@@ -390,19 +392,19 @@ bool processSerialCommand()
     }
     case 'B': // rpm[:max_rpm] (int)
     {
-        const int separator_index = getSeparatorIndex(serial_buffer + 1, len);
+        const int separator_index = getSeparatorIndex(buffer, len);
         if (separator_index == 0)
         {
             break;
         }
         const bool no_max_rpm =
             separator_index == (len - 1) || separator_index == -1;
-        int rpm = str2int(serial_buffer + 1,
+        int rpm = str2int(buffer,
                           (separator_index == -1) ? len : separator_index);
 #ifdef RESCALE_RPM
         if (!no_max_rpm)
         {
-            const int max_rpm = str2int(serial_buffer + 2 + separator_index,
+            const int max_rpm = str2int(buffer + separator_index + 1,
                                         len - separator_index - 1);
             if (max_rpm != 0)
             {
@@ -422,64 +424,64 @@ bool processSerialCommand()
         break;
     }
     case 'C': // Backlight (bool)
-        setBacklight(serial_buffer[1] == '1');
+        setBacklight(*buffer == '1');
         break;
     case 'D': // Clutch control warning (bool)
-        setClutchControl(serial_buffer[1] == '1');
+        setClutchControl(*buffer == '1');
         break;
     case 'E': // Check lamp message (bool)
-        setCheckLamp(serial_buffer[1] == '1');
+        setCheckLamp(*buffer == '1');
         break;
     case 'F': // Key battery warning (bool)
-        setKeyBatteryWarning(serial_buffer[1] == '1');
+        setKeyBatteryWarning(*buffer == '1');
         break;
     case 'G': // Seat belt warning (bool)
-        setSeatBeltWarning(serial_buffer[1] == '1');
+        setSeatBeltWarning(*buffer == '1');
         break;
     case 'H': // Door open warning (bool)
-        setDoorOpenWarning(serial_buffer[1] == '1');
+        setDoorOpenWarning(*buffer == '1');
         break;
     case 'I': // Trunk open warning (bool)
-        setTrunkOpenWarning(serial_buffer[1] == '1');
+        setTrunkOpenWarning(*buffer == '1');
         break;
     case 'J': // Parking brake (bool)
-        setParkingBrake(serial_buffer[1] == '1');
+        setParkingBrake(*buffer == '1');
         break;
     case 'K': // High water temperature (bool)
-        setHighWaterTemp(serial_buffer[1] == '1');
+        setHighWaterTemp(*buffer == '1');
         break;
     case 'L': // DPF warning (bool)
-        setDPFWarning(serial_buffer[1] == '1');
+        setDPFWarning(*buffer == '1');
         break;
     case 'M': // Preheating (bool)
-        setPreheating(serial_buffer[1] == '1');
+        setPreheating(*buffer == '1');
         break;
     case 'N': // Battery warning (bool)
-        setBatteryWarning(serial_buffer[1] == '1');
+        setBatteryWarning(*buffer == '1');
         break;
     case 'O': // Fog light (bool)
-        setFogLight(serial_buffer[1] == '1');
+        setFogLight(*buffer == '1');
         break;
     case 'P': // High beam (bool)
-        setHighBeam(serial_buffer[1] == '1');
+        setHighBeam(*buffer == '1');
         break;
     case 'Q': // Left turn indicator (bool)
-        setTurnLeft(serial_buffer[1] == '1');
+        setTurnLeft(*buffer == '1');
         break;
     case 'R': // Right turn indicator (bool)
-        setTurnRight(serial_buffer[1] == '1');
+        setTurnRight(*buffer == '1');
         break;
     case 'S': // ABS (bool)
-        setABS(serial_buffer[1] == '1');
+        setABS(*buffer == '1');
         break;
     case 'T': // Traction control (bool)
-        setTractionControl(serial_buffer[1] == '1');
+        setTractionControl(*buffer == '1');
         break;
     case 'U': // Handbrake (bool)
-        setHandbrake(serial_buffer[1] == '1');
+        setHandbrake(*buffer == '1');
         break;
     case 'V': // Low tire pressure (bool)
-        setLowTirePressure(serial_buffer[1] == '1');
+        setLowTirePressure(*buffer == '1');
         break;
     default:
         break;
