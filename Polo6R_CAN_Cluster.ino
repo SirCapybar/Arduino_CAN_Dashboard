@@ -159,6 +159,8 @@ void preparePackets()
     Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     Packets::traction = CanPacket(0x2A0, 0, 0, 0, 0, 0, 0, 0, 0);
 
+    Packets::test_packet = CanPacket(0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+
     resetEverything();
 }
 
