@@ -47,6 +47,17 @@
     DataCorePlugin.GameRawData.TruckValues.CurrentValues.DashboardValues.WarningValues.WaterTemperature
 */
 
+/*
+Packet discovery notes:
+- "check lamp" symbol can also be triggered with packet 0x394
+- bit 0x04 in the shift lock byte produces overheat warning (loud)
+- byte 1 and 2 from 0x48A seem to also do something to the RPM
+- packet 0x550 draws rear passenger seatbelt status (disappears after a while). Byte 3 contains a bitmask for the 3 seats, probably 2 bits per seat
+- packet 0x58C can also trigger shift lock lamp (byte 7). It also contains brake warning (byte 0)
+- 0x40 in byte 3 of 0x5D0 produces "TRA" notification, whatever it means
+- packet 0x85t0 also triggers airbag/seatbelt warnings
+*/
+
 struct DashboardSettings
 {
     unsigned short speed = 0; // speed [km/h]
@@ -158,7 +169,7 @@ void preparePackets()
     // speed, drivemode, potentially mileage
     Packets::drive_mode = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
     // ABS1: has to be sent to apply the speed?
-    Packets::abs1 = CanPacket(0x1A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
+    Packets::abs1 = CanPacket(0x1A0, 0, 0xA0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     // ABS2: doesn't affect the dashboard?
     Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     Packets::traction = CanPacket(0x2A0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -279,11 +290,6 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
     drive[2] = speed_high;
 
     auto &abs1 = Packets::abs1.data;
-    abs1[1] = 0xA0;
-    if (dashboard.abs)
-    {
-        abs1[1] |= 0x01;
-    }
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
 
@@ -300,7 +306,6 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
 
 inline void setRPM(unsigned short rpm = dashboard.rpm)
 {
-    // Byte 1 and 2 from 0x48A seem to also do something to the RPM
     dashboard.rpm = rpm;
     const unsigned short rpm_prescaled = rpm * 4;
     Packets::rpm.data[2] = rpm_prescaled & 0xFF;
@@ -337,7 +342,7 @@ inline void setTractionControlOff(bool on = dashboard.traction_control_off)
 
 BIT_SETTER(setBacklight, backlight, lights, 2, 0x01)
 BIT_SETTER(setClutchControl, clutch_control, lights, 4, 0x01)
-BIT_SETTER(setCheckLamp, check_lamp, lights, 4, 0x10) // also in packet 0x394
+BIT_SETTER(setCheckLamp, check_lamp, lights, 4, 0x10)
 BIT_SETTER(setKeyBatteryWarning, key_battery_warning, lights, 5, 0x80)
 BIT_SETTER(setSeatBeltWarning, seat_belt_warning, airbag, 2, 0x04)
 BIT_SETTER(setDoorOpenWarning, door_open_warning, lights, 1, 0x01)
@@ -357,7 +362,7 @@ DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode,
 BIT_SETTER(setWarningSound, warning_sound, esp, 4, 0x30)
 BIT_SETTER(setAirbagWarning, airbag_warning, airbag, 1, 0x01)
 BIT_SETTER(setDingSound, ding_sound, ding, 7, 0x04)
-BIT_SETTER(setShiftLock, shift_lock, shift, 6, 0x10) // 0x04 in the same packet produces overheat warning (loud)
+BIT_SETTER(setShiftLock, shift_lock, shift, 6, 0x10)
 
 inline void resetEverything()
 {
