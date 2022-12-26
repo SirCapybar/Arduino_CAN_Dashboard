@@ -74,6 +74,7 @@ struct DashboardSettings
     bool traction_control = false;   // traction control lamp (on/off)
     bool handbrake = false;          // handbrake lamp (on/off)
     bool low_tire_pressure = false;  // low tire pressure lamp (on/off)
+    bool warning_sound = false;      // warning ding sound, probably open door or unfastened seatbelt (on/off)
 };
 
 struct CanPacket
@@ -225,20 +226,23 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
 
     const int abs_speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.01f);
-    const byte abs_speed_low = speed_prescaled & 0xFF,
-               abs_speed_high = (speed_prescaled >> 8) & 0xFF;
-    const byte abs_speed15_low = (speed_prescaled << 1) & 0xFF,
-               abs_speed15_high = (speed_prescaled >> 7) & 0xFF;
+    const byte abs_speed_low = abs_speed_prescaled & 0xFF,
+               abs_speed_high = (abs_speed_prescaled >> 8) & 0xFF;
+    const byte abs_speed15_low = (abs_speed_prescaled << 1) & 0xFF,
+               abs_speed15_high = (abs_speed_prescaled >> 7) & 0xFF;
 
     auto &esp = Packets::esp.data;
     esp[1] = speed_low;
     esp[2] = speed_high;
 
+    // esp[5] = 0x00; trip distance
+    // esp[6] = 0x00; to be continued
+
     auto &motor_speed = Packets::motor_speed.data;
     motor_speed[3] = abs_speed_low;
     motor_speed[4] = abs_speed_high;
-    motor_speed[5] = abs_speed_low;
-    motor_speed[6] = abs_speed_high;
+    motor_speed[5] = abs_speed15_low;
+    motor_speed[6] = abs_speed15_high;
 
     auto &drive = Packets::drive_mode.data;
     drive[1] = speed_low;
@@ -292,6 +296,7 @@ DUAL_BIT_SETTER(setABS, abs, esp, 3, 0x01, drive_mode, 3, 0x01)
 DUAL_BIT_SETTER(setTractionControl, traction_control, esp, 3, 0x02, drive_mode, 3, 0x02)
 DUAL_BIT_SETTER(setHandbrake, handbrake, esp, 3, 0x04, drive_mode, 3, 0x04)
 DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode, 3, 0x08)
+BIT_SETTER(setWarningSound, warning_sound, esp, 4, 0x30)
 
 inline void resetEverything()
 {
@@ -317,6 +322,7 @@ inline void resetEverything()
     setTractionControl();
     setHandbrake();
     setLowTirePressure();
+    setWarningSound();
 }
 
 inline int str2int(const char *str, int len)
