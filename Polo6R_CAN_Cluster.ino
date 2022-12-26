@@ -94,10 +94,11 @@ struct DashboardSettings
 
 struct CanPacket
 {
-    short address = 0;
+    unsigned long address = 0;
     unsigned char data[8] = {};
+    unsigned char length = 8;
     CanPacket() = default;
-    CanPacket(short address, byte a, byte b, byte c, byte d, byte e, byte f,
+    CanPacket(unsigned long address, byte a, byte b, byte c, byte d, byte e, byte f,
               byte g, byte h)
         : address(address)
     {
@@ -111,12 +112,12 @@ struct CanPacket
         data[7] = h;
     }
 
-    void print()
+    void print() const
     {
         Serial.print(address, 16);
-        for (unsigned char i = 0; i < 8; ++i)
+        for (unsigned char i = 0; i < length; ++i)
         {
-            Serial.print(';');
+            Serial.print(' ');
             Serial.print(data[i], 16);
         }
     }
@@ -142,15 +143,16 @@ namespace Packets
     CanPacket test_packet;
 }
 
-const size_t SERIAL_BUFF_SIZE = 64;
+const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16;
 char serial_buffer[SERIAL_BUFF_SIZE];
+unsigned char incoming_can_buffer[INCOMING_CAN_BUFFER_SIZE];
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
 
 void canSend(CanPacket &packet)
 {
-    can.sendMsgBuf(packet.address, 0, 8, packet.data);
+    can.sendMsgBuf(packet.address, 0, packet.length, packet.data);
 }
 
 void preparePackets()
@@ -164,7 +166,7 @@ void preparePackets()
     Packets::airbag = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0);      // 20ms / 50Hz
     Packets::esp = CanPacket(0xDA0, 0, 0, 0, 0, 0, 0, 0, 0);            // unknown, possibly 100ms / 10Hz
     // motor speed? doesn't affect the dashboard at all
-    Packets::motor_speed = CanPacket(0x320, 0x04, 0, 0x40, 0, 0, 0, 0, 0);  // 20ms / 50Hz
+    Packets::motor_speed = CanPacket(0x320, 0x06, 0, 0, 0, 0, 0, 0, 0x80);  // 20ms / 50Hz
     Packets::rpm = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0x0E, 0, 0x1B, 0x0E); // 20ms / 50Hz
     // speed, drivemode, potentially mileage
     Packets::drive_mode = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
@@ -208,6 +210,36 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
     if (hz10)
     {
         canSend(Packets::drive_mode);
+    }
+}
+
+void handleIncomingPacket(const CanPacket &packet)
+{
+    switch (packet.address)
+    {
+    case 0x320:
+        // Serial.print("< ");
+        // packet.print();
+        // Serial.println();
+        //  Serial.print("> ");
+        //  Packets::motor_speed.print();
+        //  Serial.println();
+        break;
+    default:
+        break;
+    }
+}
+
+void receivePackets()
+{
+    if (can.checkReceive() == CAN_MSGAVAIL)
+    {
+        CanPacket packet;
+        if (can.readMsgBuf(&packet.address, &packet.length, packet.data) == CAN_NOMSG)
+        {
+            return;
+        }
+        handleIncomingPacket(packet);
     }
 }
 
@@ -260,17 +292,17 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
 inline void setSpeed(unsigned short speed = dashboard.speed)
 {
     dashboard.speed = speed;
-    const int speed_prescaled =
+    const unsigned short speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
-    const byte speed_low = speed_prescaled & 0xFF,
-               speed_high = (speed_prescaled >> 8) & 0xFF;
+    const unsigned char speed_low = speed_prescaled & 0xFF,
+                        speed_high = (speed_prescaled >> 8) & 0xFF;
 
-    const int abs_speed_prescaled =
+    const unsigned short abs_speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.01f);
-    const byte abs_speed_low = abs_speed_prescaled & 0xFF,
-               abs_speed_high = (abs_speed_prescaled >> 8) & 0xFF;
-    const byte abs_speed15_low = (abs_speed_prescaled << 1) & 0xFF,
-               abs_speed15_high = (abs_speed_prescaled >> 7) & 0xFF;
+    const unsigned char abs_speed_low = abs_speed_prescaled & 0xFF,
+                        abs_speed_high = (abs_speed_prescaled >> 8) & 0xFF;
+    const unsigned char abs_speed15_low = (abs_speed_prescaled << 1) & 0xFF,
+                        abs_speed15_high = (abs_speed_prescaled >> 7) & 0xFF;
 
     auto &esp = Packets::esp.data;
     esp[1] = speed_low;
@@ -659,5 +691,6 @@ void loop()
         micros_timer_5hz += 200000;
     }
     sendPackets(hz100, hz50, hz10, hz5);
+    receivePackets();
     processSerialCommand();
 }
