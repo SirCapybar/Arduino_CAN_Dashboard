@@ -75,12 +75,13 @@ struct DashboardSettings
     bool handbrake = false;          // handbrake lamp (on/off)
     bool low_tire_pressure = false;  // low tire pressure lamp (on/off)
     bool warning_sound = false;      // warning ding sound, probably open door or unfastened seatbelt (on/off)
+    bool airbag_warning = false;     // airbag warning lamp (on/off)
 };
 
 struct CanPacket
 {
-    short address;
-    unsigned char data[8];
+    short address = 0;
+    unsigned char data[8] = {};
     CanPacket() = default;
     CanPacket(short address, byte a, byte b, byte c, byte d, byte e, byte f,
               byte g, byte h)
@@ -94,6 +95,16 @@ struct CanPacket
         data[5] = f;
         data[6] = g;
         data[7] = h;
+    }
+
+    void print()
+    {
+        Serial.print(address, 16);
+        for (unsigned char i = 0; i < 8; ++i)
+        {
+            Serial.print(';');
+            Serial.print(data[i], 16);
+        }
     }
 };
 
@@ -111,6 +122,7 @@ namespace Packets
     CanPacket drive_mode;
     CanPacket abs1;
     CanPacket abs2;
+    CanPacket test_packet;
 }
 
 const size_t SERIAL_BUFF_SIZE = 64;
@@ -159,6 +171,10 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(Packets::abs1);
         canSend(Packets::abs2);
         canSend(Packets::lights);
+        if (Packets::test_packet.address != 0)
+        {
+            canSend(Packets::test_packet);
+        }
     }
     if (hz50)
     {
@@ -297,6 +313,7 @@ DUAL_BIT_SETTER(setTractionControl, traction_control, esp, 3, 0x02, drive_mode, 
 DUAL_BIT_SETTER(setHandbrake, handbrake, esp, 3, 0x04, drive_mode, 3, 0x04)
 DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode, 3, 0x08)
 BIT_SETTER(setWarningSound, warning_sound, esp, 4, 0x30)
+BIT_SETTER(setAirbagWarning, airbag_warning, airbag, 1, 0x01)
 
 inline void resetEverything()
 {
@@ -353,8 +370,13 @@ bool processSerialCommand()
     {
         return false;
     }
+    if (Serial.peek() == '\n')
+    {
+        Serial.read();
+        return false;
+    }
     int len = Serial.readBytesUntil(MSG_DELIMITER, serial_buffer, SERIAL_BUFF_SIZE);
-    if (len < 2)
+    if (len < 2 && !(len == 1 && serial_buffer[0] == 'x'))
     {
         return true;
     }
@@ -363,6 +385,32 @@ bool processSerialCommand()
     --len;
     switch (header)
     {
+    case 'x': // debugging: set test packet address
+    {
+        if (len == 0)
+        {
+            ++Packets::test_packet.address;
+        }
+        else
+        {
+            buffer[len] = '\0';
+            Packets::test_packet.address = strtol(buffer, nullptr, 16);
+        }
+        Packets::test_packet.print();
+        Serial.println();
+        break;
+    }
+    case 'y': // debugging: set test packet value
+    {
+        buffer[len] = '\0';
+        for (unsigned char i = 0; i < 8; ++i)
+        {
+            Packets::test_packet.data[i] = strtol(buffer, &buffer, 16);
+        }
+        Packets::test_packet.print();
+        Serial.println();
+        break;
+    }
     case 'A': // speed[:max_speed] (int)
     {
         const int separator_index = getSeparatorIndex(buffer, len);
@@ -488,6 +536,12 @@ bool processSerialCommand()
         break;
     case 'V': // Low tire pressure (bool)
         setLowTirePressure(*buffer == '1');
+        break;
+    case 'X': // Warning sound (bool)
+        setWarningSound(*buffer == '1');
+        break;
+    case 'Y': // Airbag warning (bool)
+        setAirbagWarning(*buffer == '1');
         break;
     default:
         break;
