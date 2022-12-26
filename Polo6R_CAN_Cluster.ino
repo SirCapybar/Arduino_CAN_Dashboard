@@ -78,6 +78,7 @@ struct DashboardSettings
     bool airbag_warning = false;       // airbag warning lamp (on/off)
     bool traction_control_off = false; // traction control OFF lamp (on/off)
     bool ding_sound = false;           // Another warning ding sound, open door/unfastened seatbelt I suppose (on/off)
+    bool shift_lock = false;           // Shift lock lamp (on/off)
 };
 
 struct CanPacket
@@ -126,6 +127,7 @@ namespace Packets
     CanPacket abs2;
     CanPacket traction;
     CanPacket ding;
+    CanPacket shift;
     CanPacket test_packet;
 }
 
@@ -161,6 +163,7 @@ void preparePackets()
     Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     Packets::traction = CanPacket(0x2A0, 0, 0, 0, 0, 0, 0, 0, 0);
     Packets::ding = CanPacket(0x2C0, 0, 0, 0, 0, 0, 0, 0, 0);
+    Packets::shift = CanPacket(0x540, 0, 0, 0, 0, 0, 0, 0, 0);
 
     Packets::test_packet = CanPacket(0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
 
@@ -189,6 +192,7 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(Packets::motor_speed);
         canSend(Packets::ding);
         canSend(Packets::traction);
+        canSend(Packets::shift);
     }
     if (hz10)
     {
@@ -296,6 +300,7 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
 
 inline void setRPM(unsigned short rpm = dashboard.rpm)
 {
+    // Byte 1 and 2 from 0x48A seem to also do something to the RPM
     dashboard.rpm = rpm;
     const unsigned short rpm_prescaled = rpm * 4;
     Packets::rpm.data[2] = rpm_prescaled & 0xFF;
@@ -332,7 +337,7 @@ inline void setTractionControlOff(bool on = dashboard.traction_control_off)
 
 BIT_SETTER(setBacklight, backlight, lights, 2, 0x01)
 BIT_SETTER(setClutchControl, clutch_control, lights, 4, 0x01)
-BIT_SETTER(setCheckLamp, check_lamp, lights, 4, 0x10)
+BIT_SETTER(setCheckLamp, check_lamp, lights, 4, 0x10) // also in packet 0x394
 BIT_SETTER(setKeyBatteryWarning, key_battery_warning, lights, 5, 0x80)
 BIT_SETTER(setSeatBeltWarning, seat_belt_warning, airbag, 2, 0x04)
 BIT_SETTER(setDoorOpenWarning, door_open_warning, lights, 1, 0x01)
@@ -352,6 +357,7 @@ DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode,
 BIT_SETTER(setWarningSound, warning_sound, esp, 4, 0x30)
 BIT_SETTER(setAirbagWarning, airbag_warning, airbag, 1, 0x01)
 BIT_SETTER(setDingSound, ding_sound, ding, 7, 0x04)
+BIT_SETTER(setShiftLock, shift_lock, shift, 6, 0x10) // 0x04 in the same packet produces overheat warning (loud)
 
 inline void resetEverything()
 {
@@ -381,6 +387,7 @@ inline void resetEverything()
     setAirbagWarning();
     setTractionControlOff();
     setDingSound();
+    setShiftLock();
 }
 
 inline int str2int(const char *str, int len)
@@ -589,6 +596,9 @@ bool processSerialCommand()
         break;
     case 'a': // Ding sound (bool)
         setDingSound(*buffer == '1');
+        break;
+    case 'b': // Shift lock (bool)
+        setShiftLock(*buffer == '1');
         break;
     default:
         break;
