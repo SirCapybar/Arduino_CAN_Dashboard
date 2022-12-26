@@ -77,6 +77,7 @@ struct DashboardSettings
     bool warning_sound = false;        // warning ding sound, probably open door or unfastened seatbelt (on/off)
     bool airbag_warning = false;       // airbag warning lamp (on/off)
     bool traction_control_off = false; // traction control OFF lamp (on/off)
+    bool ding_sound = false;           // Another warning ding sound, open door/unfastened seatbelt I suppose (on/off)
 };
 
 struct CanPacket
@@ -124,6 +125,7 @@ namespace Packets
     CanPacket abs1;
     CanPacket abs2;
     CanPacket traction;
+    CanPacket ding;
     CanPacket test_packet;
 }
 
@@ -158,6 +160,7 @@ void preparePackets()
     // ABS2: doesn't affect the dashboard?
     Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     Packets::traction = CanPacket(0x2A0, 0, 0, 0, 0, 0, 0, 0, 0);
+    Packets::ding = CanPacket(0x2C0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     Packets::test_packet = CanPacket(0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
 
@@ -176,7 +179,6 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(Packets::abs1);
         canSend(Packets::abs2);
         canSend(Packets::lights);
-        canSend(Packets::traction);
         if (Packets::test_packet.address != 0)
         {
             canSend(Packets::test_packet);
@@ -185,6 +187,8 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
     if (hz50)
     {
         canSend(Packets::motor_speed);
+        canSend(Packets::ding);
+        canSend(Packets::traction);
     }
     if (hz10)
     {
@@ -347,6 +351,7 @@ DUAL_BIT_SETTER(setHandbrake, handbrake, esp, 3, 0x04, drive_mode, 3, 0x04)
 DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode, 3, 0x08)
 BIT_SETTER(setWarningSound, warning_sound, esp, 4, 0x30)
 BIT_SETTER(setAirbagWarning, airbag_warning, airbag, 1, 0x01)
+BIT_SETTER(setDingSound, ding_sound, ding, 7, 0x04)
 
 inline void resetEverything()
 {
@@ -375,6 +380,7 @@ inline void resetEverything()
     setWarningSound();
     setAirbagWarning();
     setTractionControlOff();
+    setDingSound();
 }
 
 inline int str2int(const char *str, int len)
@@ -580,6 +586,9 @@ bool processSerialCommand()
         break;
     case 'Z': // Traction control OFF (bool)
         setTractionControlOff(*buffer == '1');
+        break;
+    case 'a': // Ding sound (bool)
+        setDingSound(*buffer == '1');
         break;
     default:
         break;
