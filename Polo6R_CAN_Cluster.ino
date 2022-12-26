@@ -57,25 +57,26 @@ struct DashboardSettings
     bool check_lamp =
         false; // display 'check lamp' message on dashboard display (on/off)
     bool key_battery_warning =
-        false;                       // display 'key battery low' message on dashboard display (on/off). probably works only at start
-    bool seat_belt_warning = false;  // seat belt warning lamp (on/off)
-    bool door_open_warning = false;  // open door warning lamp (on/off)
-    bool trunk_open_warning = false; // open trunk warning lamp (on/off)
-    bool parking_brake = false;      // parking brake lamp (on/off)
-    bool high_water_temp = false;    // high water temperature lamp (on/off) AVOID IT PLEASE, IT'S VERY LOUD
-    bool dpf_warning = false;        // DPF warning lamp (on/off)
-    bool preheating = false;         // diesel preheating lamp (on/off)
-    bool battery_warning = false;    // battery warning lamp (on/off)
-    bool fog_light = false;          // fog light lamp (on/off)
-    bool high_beam = false;          // high beam lamp (on/off)
-    bool turn_left = false;          // left turn indicator (on/off)
-    bool turn_right = false;         // right turn indicator (on/off)
-    bool abs = false;                // ABS lamp (on/off)
-    bool traction_control = false;   // traction control lamp (on/off)
-    bool handbrake = false;          // handbrake lamp (on/off)
-    bool low_tire_pressure = false;  // low tire pressure lamp (on/off)
-    bool warning_sound = false;      // warning ding sound, probably open door or unfastened seatbelt (on/off)
-    bool airbag_warning = false;     // airbag warning lamp (on/off)
+        false;                         // display 'key battery low' message on dashboard display (on/off). probably works only at start
+    bool seat_belt_warning = false;    // seat belt warning lamp (on/off)
+    bool door_open_warning = false;    // open door warning lamp (on/off)
+    bool trunk_open_warning = false;   // open trunk warning lamp (on/off)
+    bool parking_brake = false;        // parking brake lamp (on/off)
+    bool high_water_temp = false;      // high water temperature lamp (on/off) AVOID IT PLEASE, IT'S VERY LOUD
+    bool dpf_warning = false;          // DPF warning lamp (on/off)
+    bool preheating = false;           // diesel preheating lamp (on/off)
+    bool battery_warning = false;      // battery warning lamp (on/off)
+    bool fog_light = false;            // fog light lamp (on/off)
+    bool high_beam = false;            // high beam lamp (on/off)
+    bool turn_left = false;            // left turn indicator (on/off)
+    bool turn_right = false;           // right turn indicator (on/off)
+    bool abs = false;                  // ABS lamp (on/off)
+    bool traction_control = false;     // traction control lamp (on/off)
+    bool handbrake = false;            // handbrake lamp (on/off)
+    bool low_tire_pressure = false;    // low tire pressure lamp (on/off)
+    bool warning_sound = false;        // warning ding sound, probably open door or unfastened seatbelt (on/off)
+    bool airbag_warning = false;       // airbag warning lamp (on/off)
+    bool traction_control_off = false; // traction control OFF lamp (on/off)
 };
 
 struct CanPacket
@@ -122,6 +123,7 @@ namespace Packets
     CanPacket drive_mode;
     CanPacket abs1;
     CanPacket abs2;
+    CanPacket traction;
     CanPacket test_packet;
 }
 
@@ -155,6 +157,7 @@ void preparePackets()
     Packets::abs1 = CanPacket(0x1A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
     // ABS2: doesn't affect the dashboard?
     Packets::abs2 = CanPacket(0x4A0, 0, 0, 0, 0, 0, 0, 0, 0); // 10ms / 100Hz
+    Packets::traction = CanPacket(0x2A0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     resetEverything();
 }
@@ -171,6 +174,7 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(Packets::abs1);
         canSend(Packets::abs2);
         canSend(Packets::lights);
+        canSend(Packets::traction);
         if (Packets::test_packet.address != 0)
         {
             canSend(Packets::test_packet);
@@ -292,6 +296,34 @@ inline void setRPM(unsigned short rpm = dashboard.rpm)
     Packets::rpm.data[3] = (rpm_prescaled >> 8) & 0xFF;
 }
 
+inline void setTractionControl(bool on = dashboard.traction_control)
+{
+    dashboard.traction_control = on;
+    SET_BIT(Packets::esp.data[3], on, 0x02)
+    SET_BIT(Packets::drive_mode.data[3], on, 0x02)
+    if (dashboard.traction_control_off)
+    {
+        SET_BIT(Packets::traction.data[3], on, 0x8)
+    }
+    else
+    {
+        SET_BIT(Packets::traction.data[3], on, 0xC)
+    }
+}
+
+inline void setTractionControlOff(bool on = dashboard.traction_control_off)
+{
+    dashboard.traction_control_off = on;
+    if (!dashboard.traction_control)
+    {
+        SET_BIT(Packets::traction.data[3], on, 0xF4)
+    }
+    else
+    {
+        SET_BIT(Packets::traction.data[3], on, 0xF0)
+    }
+}
+
 BIT_SETTER(setBacklight, backlight, lights, 2, 0x01)
 BIT_SETTER(setClutchControl, clutch_control, lights, 4, 0x01)
 BIT_SETTER(setCheckLamp, check_lamp, lights, 4, 0x10)
@@ -309,7 +341,6 @@ BIT_PIN_SETTER(setHighBeam, high_beam, lights, 7, 0x40, HIGH_BEAM_INDICATOR_PIN)
 BIT_SETTER(setTurnLeft, turn_left, lights, 0, 0x01)
 BIT_SETTER(setTurnRight, turn_right, lights, 0, 0x02)
 DUAL_BIT_SETTER(setABS, abs, esp, 3, 0x01, drive_mode, 3, 0x01)
-DUAL_BIT_SETTER(setTractionControl, traction_control, esp, 3, 0x02, drive_mode, 3, 0x02)
 DUAL_BIT_SETTER(setHandbrake, handbrake, esp, 3, 0x04, drive_mode, 3, 0x04)
 DUAL_BIT_SETTER(setLowTirePressure, low_tire_pressure, esp, 3, 0x08, drive_mode, 3, 0x08)
 BIT_SETTER(setWarningSound, warning_sound, esp, 4, 0x30)
@@ -340,6 +371,8 @@ inline void resetEverything()
     setHandbrake();
     setLowTirePressure();
     setWarningSound();
+    setAirbagWarning();
+    setTractionControlOff();
 }
 
 inline int str2int(const char *str, int len)
@@ -542,6 +575,9 @@ bool processSerialCommand()
         break;
     case 'Y': // Airbag warning (bool)
         setAirbagWarning(*buffer == '1');
+        break;
+    case 'Z': // Traction control OFF (bool)
+        setTractionControlOff(*buffer == '1');
         break;
     default:
         break;
