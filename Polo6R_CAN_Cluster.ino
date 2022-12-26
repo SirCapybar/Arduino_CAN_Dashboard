@@ -162,7 +162,7 @@ void preparePackets()
     Packets::lights = CanPacket(0x470, 0, 0, 0, 0, 0, 0, 0, 0);         // unknown, possibly 100ms / 10Hz
     Packets::engine_control = CanPacket(0x480, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
     Packets::airbag = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0);      // 20ms / 50Hz
-    Packets::esp = CanPacket(0xDA0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD);      // unknown, possibly 100ms / 10Hz
+    Packets::esp = CanPacket(0xDA0, 0, 0, 0, 0, 0, 0, 0, 0);            // unknown, possibly 100ms / 10Hz
     // motor speed? doesn't affect the dashboard at all
     Packets::motor_speed = CanPacket(0x320, 0x04, 0, 0x40, 0, 0, 0, 0, 0);  // 20ms / 50Hz
     Packets::rpm = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0x0E, 0, 0x1B, 0x0E); // 20ms / 50Hz
@@ -276,6 +276,8 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
     esp[1] = speed_low;
     esp[2] = speed_high;
 
+    // esp[5] = random() % 256;
+    // esp[6] = 0x08;
     // esp[5] = 0x00; trip distance
     // esp[6] = 0x00; to be continued
 
