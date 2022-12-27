@@ -112,6 +112,30 @@ struct CanPacket
         data[7] = h;
     }
 
+    CanPacket &operator=(const CanPacket &other)
+    {
+        if (this == &other)
+        {
+            return *this;
+        }
+        address = other.address;
+        length = other.length;
+        for (unsigned char i = 0; i < length; ++i)
+        {
+            data[i] = other.data[i];
+        }
+        return *this;
+    }
+
+    void copyDataTo(CanPacket &packet) const
+    {
+        packet.length = length;
+        for (unsigned char i = 0; i < length; ++i)
+        {
+            packet.data[i] = data[i];
+        }
+    }
+
     void print() const
     {
         Serial.print(address, 16);
@@ -120,6 +144,18 @@ struct CanPacket
             Serial.print(' ');
             Serial.print(data[i], 16);
         }
+    }
+
+    void print(bool is_input) const
+    {
+        Serial.print(is_input ? "< " : "> ");
+        Serial.print(address, 16);
+        for (unsigned char i = 0; i < length; ++i)
+        {
+            Serial.print(' ');
+            Serial.print(data[i], 16);
+        }
+        Serial.println();
     }
 };
 
@@ -143,6 +179,7 @@ namespace Packets
     CanPacket test_packet;
 }
 
+bool is_speed_resetting = false;
 const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16;
 char serial_buffer[SERIAL_BUFF_SIZE];
 unsigned char incoming_can_buffer[INCOMING_CAN_BUFFER_SIZE];
@@ -181,66 +218,6 @@ void preparePackets()
     Packets::test_packet = CanPacket(0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
 
     resetEverything();
-}
-
-void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
-{
-    if (hz100)
-    {
-        canSend(Packets::immobilizer);
-        canSend(Packets::engine_control);
-        canSend(Packets::rpm);
-        canSend(Packets::airbag);
-        canSend(Packets::esp);
-        canSend(Packets::abs1);
-        canSend(Packets::abs2);
-        canSend(Packets::lights);
-        if (Packets::test_packet.address != 0)
-        {
-            canSend(Packets::test_packet);
-        }
-    }
-    if (hz50)
-    {
-        canSend(Packets::motor_speed);
-        canSend(Packets::ding);
-        canSend(Packets::traction);
-        canSend(Packets::shift);
-    }
-    if (hz10)
-    {
-        canSend(Packets::drive_mode);
-    }
-}
-
-void handleIncomingPacket(const CanPacket &packet)
-{
-    switch (packet.address)
-    {
-    case 0x320:
-        // Serial.print("< ");
-        // packet.print();
-        // Serial.println();
-        //  Serial.print("> ");
-        //  Packets::motor_speed.print();
-        //  Serial.println();
-        break;
-    default:
-        break;
-    }
-}
-
-void receivePackets()
-{
-    if (can.checkReceive() == CAN_MSGAVAIL)
-    {
-        CanPacket packet;
-        if (can.readMsgBuf(&packet.address, &packet.length, packet.data) == CAN_NOMSG)
-        {
-            return;
-        }
-        handleIncomingPacket(packet);
-    }
 }
 
 #define SET_BIT(byte_value, state, bitmask) \
@@ -292,6 +269,35 @@ void receivePackets()
 inline void setSpeed(unsigned short speed = dashboard.speed)
 {
     dashboard.speed = speed;
+    auto &esp = Packets::esp.data;
+    auto &motor_speed = Packets::motor_speed.data;
+    auto &drive = Packets::drive_mode.data;
+    auto &abs1 = Packets::abs1.data;
+    auto &abs2 = Packets::abs2.data;
+
+    if (is_speed_resetting)
+    {
+        esp[1] = 0;
+        esp[2] = 0;
+        motor_speed[3] = 0;
+        motor_speed[4] = 0;
+        motor_speed[5] = 0;
+        motor_speed[6] = 0;
+        drive[1] = 0;
+        drive[2] = 0;
+        abs1[2] = 0x01;
+        abs1[3] = 0x01;
+        abs2[0] = 0x01;
+        abs2[1] = 0;
+        abs2[2] = 0x01;
+        abs2[3] = 0;
+        abs2[4] = 0x01;
+        abs2[5] = 0;
+        abs2[6] = 0x01;
+        abs2[7] = 0;
+        return;
+    }
+
     const unsigned short speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.007f);
     const unsigned char speed_low = speed_prescaled & 0xFF,
@@ -301,10 +307,9 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.01f);
     const unsigned char abs_speed_low = abs_speed_prescaled & 0xFF,
                         abs_speed_high = (abs_speed_prescaled >> 8) & 0xFF;
-    const unsigned char abs_speed15_low = (abs_speed_prescaled << 1) & 0xFF,
+    const unsigned char abs_speed15_low = ((abs_speed_prescaled << 1) & 0xFF) | 0x01,
                         abs_speed15_high = (abs_speed_prescaled >> 7) & 0xFF;
 
-    auto &esp = Packets::esp.data;
     esp[1] = speed_low;
     esp[2] = speed_high;
 
@@ -313,21 +318,17 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
     // esp[5] = 0x00; trip distance
     // esp[6] = 0x00; to be continued
 
-    auto &motor_speed = Packets::motor_speed.data;
     motor_speed[3] = abs_speed_low;
     motor_speed[4] = abs_speed_high;
     motor_speed[5] = abs_speed15_low;
     motor_speed[6] = abs_speed15_high;
 
-    auto &drive = Packets::drive_mode.data;
     drive[1] = speed_low;
     drive[2] = speed_high;
 
-    auto &abs1 = Packets::abs1.data;
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
 
-    auto &abs2 = Packets::abs2.data;
     abs2[0] = abs_speed15_low;
     abs2[1] = abs_speed15_high;
     abs2[2] = abs_speed15_low;
@@ -427,6 +428,91 @@ inline void resetEverything()
     setTractionControlOff();
     setDingSound();
     setShiftLock();
+}
+
+void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
+{
+    using namespace Packets;
+    if (hz100)
+    {
+        canSend(immobilizer);
+        canSend(engine_control);
+        canSend(rpm);
+        canSend(airbag);
+        canSend(esp);
+        canSend(abs1);
+        canSend(abs2);
+        canSend(lights);
+        if (test_packet.address != 0)
+        {
+            canSend(test_packet);
+        }
+    }
+    if (hz50)
+    {
+        canSend(motor_speed);
+        canSend(ding);
+        canSend(traction);
+        canSend(shift);
+    }
+    if (hz10)
+    {
+        canSend(drive_mode);
+    }
+}
+
+void handleIncomingPacket(const CanPacket &packet)
+{
+    switch (packet.address)
+    {
+    case 0x420:
+        break;
+    case 0x51A:
+        break;
+    case 0x520:
+        break;
+    case 0x52A:
+        break;
+    case 0x5D2:
+        break;
+    case 0x5F3:
+        break;
+    case 0x60E:
+        break;
+    case 0x621:
+        break;
+    case 0x62E:
+        break;
+    case 0x727:
+        break;
+    case 0x320:
+    {
+        const bool reset_speed = packet.data[3] == 0xFF && packet.data[4] == 0xFF && packet.data[6] == 0xFF;
+        const bool should_update_speed = reset_speed != is_speed_resetting;
+        is_speed_resetting = reset_speed;
+        if (should_update_speed)
+        {
+            setSpeed();
+        }
+        break;
+    }
+    default:
+        packet.print(true);
+        break;
+    }
+}
+
+void receivePackets()
+{
+    if (can.checkReceive() == CAN_MSGAVAIL)
+    {
+        CanPacket packet;
+        if (can.readMsgBuf(&packet.address, &packet.length, packet.data) == CAN_NOMSG)
+        {
+            return;
+        }
+        handleIncomingPacket(packet);
+    }
 }
 
 inline int str2int(const char *str, int len)
