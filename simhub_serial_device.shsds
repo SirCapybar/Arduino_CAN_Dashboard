@@ -18,7 +18,7 @@
     },
     {
       "Message": {
-        "Expression": "'B' + round([Rpms], 0) + if([MaxRpm] and [DataCorePlugin.CurrentGame] != 'BeamNg', ':' + round([MaxRpm], 0), '') + ';'",
+        "Expression": "'A' + round([SpeedKmh], 0) + ';'",
         "SimpleOperationProp": null
       },
       "IsEnabled": true,
@@ -26,7 +26,7 @@
     },
     {
       "Message": {
-        "Expression": "'A' + round([SpeedKmh], 0) + ';'",
+        "Expression": "'B' + round([Rpms], 0) + if([MaxRpm] and [DataCorePlugin.CurrentGame] != 'BeamNg', ':' + round([MaxRpm], 0), '') + ';'",
         "SimpleOperationProp": null
       },
       "IsEnabled": true,
@@ -113,8 +113,8 @@
   "EditorExpanded": true,
   "Name": "Custom Serial device",
   "Description": "Polo 6R Cluster",
-  "LastErrorDate": "2022-01-11T21:37:34.5704679+01:00",
-  "LastErrorMessage": null,
+  "LastErrorDate": "2022-12-27T14:46:51.6782946+01:00",
+  "LastErrorMessage": "Access to the port 'COM6' is denied.",
   "IsFreezed": false,
   "SettingsBuilder": {
     "Settings": [],
