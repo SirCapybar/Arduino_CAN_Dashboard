@@ -1,6 +1,6 @@
 {
   "AutomaticReconnect": true,
-  "SerialPortName": "COM6",
+  "SerialPortName": "COM8",
   "StartupDelayMs": 1000,
   "IsConnecting": false,
   "IsEnabled": true,
@@ -10,33 +10,21 @@
   "UpdateMessages": [
     {
       "Message": {
-        "Expression": "if([DataCorePlugin.GamePaused], 'G1;H1;I1;', 'G0;H0;I0;')",
-        "SimpleOperationProp": null
+        "Expression": "if([DataCorePlugin.GamePaused], 'H1;I1;', 'H0;I0;')"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
     },
     {
       "Message": {
-        "Expression": "'A' + round([SpeedKmh], 0) + ';'",
-        "SimpleOperationProp": null
+        "Expression": "'A' + round([SpeedKmh], 0) + ';'"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
     },
     {
       "Message": {
-        "Expression": "'B' + round([Rpms], 0) + if([MaxRpm] and [DataCorePlugin.CurrentGame] != 'BeamNg', ':' + round([MaxRpm], 0), '') + ';'",
-        "SimpleOperationProp": null
-      },
-      "IsEnabled": true,
-      "MaximumFrequency": 0
-    },
-    {
-      "Message": {
-        "Interpreter": 1,
-        "Expression": "var DL_HANDBRAKE = 4\r\nreturn $prop('Handbrake') || $prop('GameRawData.ShowLights') & DL_HANDBRAKE ? 'U1;' : 'U0;'",
-        "SimpleOperationProp": null
+        "Expression": "'B' + round([Rpms], 0) + if([MaxRpm] and [DataCorePlugin.CurrentGame] != 'BeamNg', ':' + round([MaxRpm], 0), '') + ';'"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -44,40 +32,7 @@
     {
       "Message": {
         "Interpreter": 1,
-        "Expression": "var DL_ABS = 1024\r\nreturn $prop('GameRawData.ShowLights') & DL_ABS ? 'S1;' : 'S0;'",
-        "SimpleOperationProp": null
-      },
-      "IsEnabled": true,
-      "MaximumFrequency": 0
-    },
-    {
-      "Message": {
-        "Expression": "if([GameRawData.TractionControl], 'T1;', 'T0;')",
-        "SimpleOperationProp": null
-      },
-      "IsEnabled": true,
-      "MaximumFrequency": 0
-    },
-    {
-      "Message": {
-        "Expression": "if([TurnIndicatorLeft], 'Q1;', 'Q0;')",
-        "SimpleOperationProp": null
-      },
-      "IsEnabled": true,
-      "MaximumFrequency": 0
-    },
-    {
-      "Message": {
-        "Expression": "if([TurnIndicatorRight], 'R1;', 'R0;')",
-        "SimpleOperationProp": null
-      },
-      "IsEnabled": true,
-      "MaximumFrequency": 0
-    },
-    {
-      "Message": {
-        "Expression": "if([EngineStarted], 'N0;', 'N1;')",
-        "SimpleOperationProp": null
+        "Expression": "var DL_HANDBRAKE = 4\r\nreturn $prop('Handbrake') || ($prop('GameRawData.ShowLights') & DL_HANDBRAKE) || ($prop('DataCorePlugin.CurrentGame') != 'BeamNg' && $prop('JoystickPlugin.Arduino_Leonardo_RZ') > 512) ? 'U1;' : 'U0;'"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -85,36 +40,97 @@
     {
       "Message": {
         "Interpreter": 1,
-        "Expression": "var DL_FULLBEAM = 2\r\nreturn $prop('GameRawData.ShowLights') & DL_FULLBEAM || $prop('GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh') ? 'P1;' : 'P0;'",
-        "SimpleOperationProp": null
+        "Expression": "var DL_ABS = 1024\r\nvar beamng_abs = $prop('GameRawData.ShowLights') & DL_ABS\r\nvar assetto_abs = $prop('ABSLevel') != 0 && $prop('DataCorePlugin.CurrentGame') == 'AssettoCorsa'\r\nreturn beamng_abs || assetto_abs ? 'S1;' : 'S0;'"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
     },
     {
       "Message": {
-        "Expression": "if([GameRawData.TruckValues.CurrentValues.MotorValues.BrakeValues.ParkingBrake], 'J1;','J0;')",
-        "SimpleOperationProp": null
+        "Interpreter": 1,
+        "Expression": "switch($prop('DataCorePlugin.CurrentGame'))\r\n{\r\ncase 'AssettoCorsa':\r\n{\r\nreturn $prop('TCLevel') ? 'T1;Z0;' : 'T0;Z1;'\r\nbreak\r\n}\r\ncase 'BeamNg':\r\nvar DL_TC = 16\r\nreturn ($prop('TCActive') ? 'Z0;' : 'Z1;') + ($prop('GameRawData.ShowLights') & DL_TC ? 'T1;' : 'T0;')\r\nbreak;\r\ndefault:\r\nreturn ($prop('TCActive') ? 'T1;' : 'T0;') + ($prop('TCLevel') ? 'Z0;' : 'Z1;')\r\n}"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([TurnIndicatorLeft], 'Q1;', 'Q0;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([TurnIndicatorRight], 'R1;', 'R0;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([EngineStarted], 'N0;', 'N1;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Interpreter": 1,
+        "Expression": "var DL_FULLBEAM = 2\r\nreturn $prop('GameRawData.ShowLights') & DL_FULLBEAM || $prop('GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh') ? 'P1;' : 'P0;'"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([GameRawData.TruckValues.CurrentValues.MotorValues.BrakeValues.ParkingBrake], 'J1;','J0;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([GameRawData.Graphics.IsInPit] or [GameRawData.Graphics.isInPitLane], 'b1;', 'b0;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([CarDamagesAvg] >= 50,'L1;Y1;','L0;Y0;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([DataCorePlugin.GameData.TyresWearMin] or [DataCorePlugin.CurrentGame] != 'AssettoCorsa','V0;','V1;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([DataCorePlugin.GameRunning], 'C1;', 'C0;')"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
     }
   ],
   "OnConnectMessage": {
-    "Expression": "",
-    "SimpleOperationProp": null
+    "Expression": ""
   },
   "OnDisconnectMessage": {
-    "Expression": "",
-    "SimpleOperationProp": null
+    "Expression": ""
   },
   "DtrEnable": true,
   "RtsEnable": true,
   "EditorExpanded": true,
   "Name": "Custom Serial device",
   "Description": "Polo 6R Cluster",
-  "LastErrorDate": "2022-12-27T14:46:51.6782946+01:00",
-  "LastErrorMessage": "Access to the port 'COM6' is denied.",
+  "LastErrorDate": "2022-12-27T14:47:21.7578998+01:00",
+  "LastErrorMessage": null,
   "IsFreezed": false,
   "SettingsBuilder": {
     "Settings": [],
