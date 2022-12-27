@@ -64,9 +64,9 @@ struct DashboardSettings
     unsigned short rpm = 0;   // revs [rpm]
     bool backlight = true;    // dashboard backlight (on/off)
     bool clutch_control =
-        false; // display clutch message on dashboard display (on/off)
+        true; // display clutch message on dashboard display (on/off)
     bool check_lamp =
-        false; // display 'check lamp' message on dashboard display (on/off)
+        false; // display 'check lamp' warning lamp (on/off)
     bool key_battery_warning =
         false;                         // display 'key battery low' message on dashboard display (on/off). probably works only at start
     bool seat_belt_warning = false;    // seat belt warning lamp (on/off)
