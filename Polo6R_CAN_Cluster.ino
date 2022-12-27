@@ -127,12 +127,22 @@ struct CanPacket
         return *this;
     }
 
+    unsigned char &operator[](int index)
+    {
+        return data[index];
+    }
+
+    const unsigned char &operator[](int index) const
+    {
+        return data[index];
+    }
+
     void copyDataTo(CanPacket &packet) const
     {
         packet.length = length;
         for (unsigned char i = 0; i < length; ++i)
         {
-            packet.data[i] = data[i];
+            packet[i] = data[i];
         }
     }
 
@@ -234,22 +244,22 @@ void preparePackets()
     inline void setter_name(bool on = dashboard.variable_name)              \
     {                                                                       \
         dashboard.variable_name = on;                                       \
-        SET_BIT(Packets::packet.data[byte_index], on, bitmask);             \
+        SET_BIT(Packets::packet[byte_index], on, bitmask);                  \
     }
 
 #define DUAL_BIT_SETTER(setter_name, variable_name, packet1, byte_index1, bitmask1, packet2, byte_index2, bitmask2) \
     inline void setter_name(bool on = dashboard.variable_name)                                                      \
     {                                                                                                               \
         dashboard.variable_name = on;                                                                               \
-        SET_BIT(Packets::packet1.data[byte_index1], on, bitmask1);                                                  \
-        SET_BIT(Packets::packet2.data[byte_index2], on, bitmask2);                                                  \
+        SET_BIT(Packets::packet1[byte_index1], on, bitmask1);                                                       \
+        SET_BIT(Packets::packet2[byte_index2], on, bitmask2);                                                       \
     }
 
 #define BIT_PIN_SETTER(setter_name, variable_name, packet, byte_index, bitmask, pin) \
     inline void setter_name(bool on = dashboard.variable_name)                       \
     {                                                                                \
         dashboard.variable_name = on;                                                \
-        SET_BIT(Packets::packet.data[byte_index], on, bitmask);                      \
+        SET_BIT(Packets::packet[byte_index], on, bitmask);                           \
         digitalWrite(pin, on ? HIGH : LOW);                                          \
     }
 #define PIN_SETTER(setter_name, variable_name, pin)            \
@@ -268,12 +278,8 @@ void preparePackets()
 
 inline void setSpeed(unsigned short speed = dashboard.speed)
 {
+    using namespace Packets;
     dashboard.speed = speed;
-    auto &esp = Packets::esp.data;
-    auto &motor_speed = Packets::motor_speed.data;
-    auto &drive = Packets::drive_mode.data;
-    auto &abs1 = Packets::abs1.data;
-    auto &abs2 = Packets::abs2.data;
 
     if (is_speed_resetting)
     {
@@ -283,8 +289,8 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
         motor_speed[4] = 0;
         motor_speed[5] = 0;
         motor_speed[6] = 0;
-        drive[1] = 0;
-        drive[2] = 0;
+        drive_mode[1] = 0;
+        drive_mode[2] = 0;
         abs1[2] = 0x01;
         abs1[3] = 0x01;
         abs2[0] = 0x01;
@@ -323,8 +329,8 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
     motor_speed[5] = abs_speed15_low;
     motor_speed[6] = abs_speed15_high;
 
-    drive[1] = speed_low;
-    drive[2] = speed_high;
+    drive_mode[1] = speed_low;
+    drive_mode[2] = speed_high;
 
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
@@ -343,22 +349,22 @@ inline void setRPM(unsigned short rpm = dashboard.rpm)
 {
     dashboard.rpm = rpm;
     const unsigned short rpm_prescaled = rpm * 4;
-    Packets::rpm.data[2] = rpm_prescaled & 0xFF;
-    Packets::rpm.data[3] = (rpm_prescaled >> 8) & 0xFF;
+    Packets::rpm[2] = rpm_prescaled & 0xFF;
+    Packets::rpm[3] = (rpm_prescaled >> 8) & 0xFF;
 }
 
 inline void setTractionControl(bool on = dashboard.traction_control)
 {
     dashboard.traction_control = on;
-    SET_BIT(Packets::esp.data[3], on, 0x02)
-    SET_BIT(Packets::drive_mode.data[3], on, 0x02)
+    SET_BIT(Packets::esp[3], on, 0x02)
+    SET_BIT(Packets::drive_mode[3], on, 0x02)
     if (dashboard.traction_control_off)
     {
-        SET_BIT(Packets::traction.data[3], on, 0x8)
+        SET_BIT(Packets::traction[3], on, 0x8)
     }
     else
     {
-        SET_BIT(Packets::traction.data[3], on, 0xC)
+        SET_BIT(Packets::traction[3], on, 0xC)
     }
 }
 
@@ -367,11 +373,11 @@ inline void setTractionControlOff(bool on = dashboard.traction_control_off)
     dashboard.traction_control_off = on;
     if (!dashboard.traction_control)
     {
-        SET_BIT(Packets::traction.data[3], on, 0xF4)
+        SET_BIT(Packets::traction[3], on, 0xF4)
     }
     else
     {
-        SET_BIT(Packets::traction.data[3], on, 0xF0)
+        SET_BIT(Packets::traction[3], on, 0xF0)
     }
 }
 
@@ -487,7 +493,7 @@ void handleIncomingPacket(const CanPacket &packet)
         break;
     case 0x320:
     {
-        const bool reset_speed = packet.data[3] == 0xFF && packet.data[4] == 0xFF && packet.data[6] == 0xFF;
+        const bool reset_speed = packet[3] == 0xFF && packet[4] == 0xFF && packet[6] == 0xFF;
         const bool should_update_speed = reset_speed != is_speed_resetting;
         is_speed_resetting = reset_speed;
         if (should_update_speed)
@@ -578,7 +584,7 @@ bool processSerialCommand()
         buffer[len] = '\0';
         for (unsigned char i = 0; i < 8; ++i)
         {
-            Packets::test_packet.data[i] = strtol(buffer, &buffer, 16);
+            Packets::test_packet[i] = strtol(buffer, &buffer, 16);
         }
         Packets::test_packet.print();
         Serial.println();
