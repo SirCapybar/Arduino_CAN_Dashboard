@@ -40,7 +40,7 @@
     {
       "Message": {
         "Interpreter": 1,
-        "Expression": "var DL_ABS = 1024\r\nvar beamng_abs = $prop('GameRawData.ShowLights') & DL_ABS\r\nvar assetto_abs = $prop('ABSLevel') != 0 && $prop('DataCorePlugin.CurrentGame') == 'AssettoCorsa'\r\nreturn beamng_abs || assetto_abs ? 'S1;' : 'S0;'"
+        "Expression": "switch($prop('DataCorePlugin.CurrentGame'))\r\n{\r\ncase 'AssettoCorsa':\r\n{\r\nreturn $prop('ABSLevel') != 0 ? 'S1;' : 'S0;'\r\nbreak\r\n}\r\ncase 'AssettoCorsaCompetizione':\r\n{\r\nreturn $prop('GameRawData.Physics.Abs') ? 'S1;' : 'S0;' \r\nbreak\r\n}\r\ncase 'BeamNg':\r\n{\r\nvar DL_ABS = 1024\r\nreturn ($prop('GameRawData.ShowLights') & DL_ABS) ? 'S1;' : 'S0;'\r\nbreak\r\n}\r\n}"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -48,7 +48,7 @@
     {
       "Message": {
         "Interpreter": 1,
-        "Expression": "switch($prop('DataCorePlugin.CurrentGame'))\r\n{\r\ncase 'AssettoCorsa':\r\n{\r\nreturn $prop('TCLevel') ? 'T1;Z0;' : 'T0;Z1;'\r\nbreak\r\n}\r\ncase 'BeamNg':\r\nvar DL_TC = 16\r\nreturn ($prop('TCActive') ? 'Z0;' : 'Z1;') + ($prop('GameRawData.ShowLights') & DL_TC ? 'T1;' : 'T0;')\r\nbreak;\r\ndefault:\r\nreturn ($prop('TCActive') ? 'T1;' : 'T0;') + ($prop('TCLevel') ? 'Z0;' : 'Z1;')\r\n}"
+        "Expression": "switch($prop('DataCorePlugin.CurrentGame'))\r\n{\r\ncase 'AssettoCorsa':\r\n{\r\nreturn $prop('TCLevel') ? 'T1;Z0;' : 'T0;Z1;'\r\nbreak\r\n}\r\ncase 'AssettoCorsaCompetizione':\r\n{\r\nreturn ($prop('GameRawData.Physics.TC') ? 'T1;' : 'T0;') + ($prop('GameRawData.Graphics.TC') ? 'Z0;' : 'Z1;')\r\nbreak\r\n}\r\ncase 'BeamNg':\r\nvar DL_TC = 16\r\nreturn ($prop('TCActive') ? 'Z0;' : 'Z1;') + ($prop('GameRawData.ShowLights') & DL_TC ? 'T1;' : 'T0;')\r\nbreak;\r\ndefault:\r\nreturn ($prop('TCActive') ? 'T1;' : 'T0;') + ($prop('TCLevel') ? 'Z0;' : 'Z1;')\r\n}"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -77,7 +77,7 @@
     {
       "Message": {
         "Interpreter": 1,
-        "Expression": "var DL_FULLBEAM = 2\r\nreturn $prop('GameRawData.ShowLights') & DL_FULLBEAM || $prop('GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh') ? 'P1;' : 'P0;'"
+        "Expression": "var DL_FULLBEAM = 2\r\nreturn $prop('GameRawData.ShowLights') & DL_FULLBEAM || $prop('GameRawData.TruckValues.CurrentValues.LightsValues.BeamHigh')|| $prop('GameRawData.Graphics.LightsStage') == 2 ? 'P1;' : 'P0;'"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -105,7 +105,7 @@
     },
     {
       "Message": {
-        "Expression": "if([DataCorePlugin.GameData.TyresWearMin] or [DataCorePlugin.CurrentGame] != 'AssettoCorsa','V0;','V1;')"
+        "Expression": "if([DataCorePlugin.GameData.TyresWearMin] or [DataCorePlugin.GameRawData.Physics.NumberOfTyresOut] or [DataCorePlugin.CurrentGame] != 'AssettoCorsa','V0;','V1;')"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -113,6 +113,13 @@
     {
       "Message": {
         "Expression": "if([DataCorePlugin.GameRunning], 'C1;', 'C0;')"
+      },
+      "IsEnabled": true,
+      "MaximumFrequency": 0
+    },
+    {
+      "Message": {
+        "Expression": "if([GameRawData.Graphics.RainLights], 'O1;', 'O0;')"
       },
       "IsEnabled": true,
       "MaximumFrequency": 0
@@ -129,7 +136,7 @@
   "EditorExpanded": true,
   "Name": "Custom Serial device",
   "Description": "Polo 6R Cluster",
-  "LastErrorDate": "2022-12-27T14:47:21.7578998+01:00",
+  "LastErrorDate": "2022-12-29T12:25:16.9349027+01:00",
   "LastErrorMessage": null,
   "IsFreezed": false,
   "SettingsBuilder": {
