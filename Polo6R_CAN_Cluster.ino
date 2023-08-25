@@ -13,6 +13,8 @@
 
 #define MAX_RPM 6000U
 #define MAX_KMH 240U
+#define MIN_OIL_TEMP 50U
+#define MAX_OIL_TEMP 194U
 
 #define MSG_VALUE_SEPARATOR ':'
 #define MSG_DELIMITER ';'
@@ -60,10 +62,11 @@ Packet discovery notes:
 
 struct DashboardSettings
 {
-    unsigned short speed = 0;    // speed [km/h]
-    unsigned short rpm = 0;      // revs [rpm]
-    size_t water_temp_index = 0; // water temperature value index (see arrays below)
-    bool backlight = true;       // dashboard backlight (on/off)
+    unsigned short speed = 0;              // speed [km/h]
+    unsigned short rpm = 0;                // revs [rpm]
+    unsigned char oil_temp = MIN_OIL_TEMP; // oil temperature [°C]
+    size_t water_temp_index = 0;           // water temperature value index (see arrays below)
+    bool backlight = true;                 // dashboard backlight (on/off)
     bool clutch_control =
         true; // display clutch message on dashboard display (on/off)
     bool check_lamp =
@@ -178,11 +181,12 @@ namespace Packets
     CanPacket immobilizer;
     CanPacket lights;
     CanPacket engine_control;
-    CanPacket airbag;     // airbag and seat belt info
-    CanPacket esp;        // engine and ESP
+    CanPacket airbag; // airbag and seat belt info
+    CanPacket esp;    // engine and ESP
     CanPacket motor_speed;
     CanPacket rpm;
     CanPacket water_temp; // water temperature and cruise control indicator
+    CanPacket oil_temp;   // oil temperature
     CanPacket drive_mode;
     CanPacket abs1;
     CanPacket abs2;
@@ -220,7 +224,8 @@ void preparePackets()
     // motor speed? doesn't affect the dashboard at all
     Packets::motor_speed = CanPacket(0x320, 0x06, 0, 0, 0, 0, 0, 0, 0x80);  // 20ms / 50Hz
     Packets::rpm = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0x0E, 0, 0x1B, 0x0E); // 20ms / 50Hz
-    Packets::water_temp = CanPacket(0x288, 0, 0, 0, 0, 0, 0, 0, 0);     // unknown, possibly 100ms / 10Hz
+    Packets::water_temp = CanPacket(0x288, 0, 0, 0, 0, 0, 0, 0, 0);         // unknown, possibly 100ms / 10Hz
+    Packets::oil_temp = CanPacket(0x588, 0, 0, 0, 0, 0, 0, 0, 0);
     // speed, drivemode, potentially mileage
     Packets::drive_mode = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
     // ABS1: has to be sent to apply the speed?
@@ -394,7 +399,7 @@ inline void setRPM(unsigned short rpm = dashboard.rpm)
     Packets::rpm[3] = (rpm_prescaled >> 8) & 0xFF;
 }
 
-inline void setWaterTemp(size_t water_temp_index = dashboard.water_temp_index)
+inline void setWaterTempIndex(size_t water_temp_index = dashboard.water_temp_index)
 {
     if (water_temp_index < 0)
     {
@@ -406,6 +411,12 @@ inline void setWaterTemp(size_t water_temp_index = dashboard.water_temp_index)
     }
     dashboard.water_temp_index = water_temp_index;
     Packets::water_temp[1] = WATER_TEMP_BYTES[water_temp_index];
+}
+
+inline void setOilTemp(unsigned char oil_temp)
+{
+    dashboard.oil_temp = oil_temp;
+    Packets::oil_temp[7] = oil_temp + 60;
 }
 
 inline void setTractionControl(bool on = dashboard.traction_control)
@@ -501,6 +512,7 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(engine_control);
         canSend(rpm);
         canSend(water_temp);
+        canSend(oil_temp);
         canSend(airbag);
         canSend(esp);
         canSend(abs1);
@@ -798,10 +810,28 @@ bool processSerialCommand()
         int water_temp = str2int(buffer,
                                  (separator_index == -1) ? len : separator_index);
         size_t water_temp_index = getWaterTempIndex(water_temp);
-        setWaterTemp(water_temp_index);
+        setWaterTempIndex(water_temp_index);
         break;
     case 'd': // Cruise control (bool)
         setCruiseControl(*buffer == '1');
+        break;
+    case 'e': // Oil temperature (int)
+        const int separator_index = getSeparatorIndex(buffer, len);
+        if (separator_index == 0)
+        {
+            break;
+        }
+        int oil_temp = str2int(buffer,
+                               (separator_index == -1) ? len : separator_index);
+        if (oil_temp < MIN_OIL_TEMP)
+        {
+            oil_temp = MIN_OIL_TEMP;
+        }
+        else if (oil_temp > MAX_OIL_TEMP)
+        {
+            oil_temp = MAX_OIL_TEMP;
+        }
+        setOilTemp(oil_temp);
         break;
     default:
         break;
