@@ -184,7 +184,6 @@ namespace Packets
     CanPacket engine_control;
     CanPacket airbag; // airbag and seat belt info
     CanPacket esp;    // engine and ESP
-    CanPacket motor_speed;
     CanPacket rpm;
     CanPacket water_temp; // water temperature and cruise control indicator
     CanPacket oil_temp;   // oil temperature
@@ -236,8 +235,6 @@ void preparePackets()
     Packets::engine_control = CanPacket(0x480, 0, 0, 0, 0, 0, 0, 0, 0); // unknown, possibly 100ms / 10Hz
     Packets::airbag = CanPacket(0x050, 0, 0x80, 0, 0, 0, 0, 0, 0);      // 20ms / 50Hz
     Packets::esp = CanPacket(0xDA0, 0, 0, 0, 0, 0, 0, 0, 0);            // unknown, possibly 100ms / 10Hz
-    // motor speed? doesn't affect the dashboard at all
-    Packets::motor_speed = CanPacket(0x320, 0x06, 0, 0, 0, 0, 0, 0, 0x80);  // 20ms / 50Hz
     Packets::rpm = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0x0E, 0, 0x1B, 0x0E); // 20ms / 50Hz
     Packets::water_temp = CanPacket(0x288, 0, 0, 0, 0, 0, 0, 0, 0);         // unknown, possibly 100ms / 10Hz
     Packets::oil_temp = CanPacket(0x588, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -346,10 +343,6 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
     {
         esp[1] = 0;
         esp[2] = 0;
-        motor_speed[3] = 0;
-        motor_speed[4] = 0;
-        motor_speed[5] = 0;
-        motor_speed[6] = 0;
         drive_mode[1] = 0;
         drive_mode[2] = 0;
         abs1[2] = 0x01;
@@ -379,16 +372,6 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
 
     esp[1] = speed_low;
     esp[2] = speed_high;
-
-    // esp[5] = random() % 256;
-    // esp[6] = 0x08;
-    // esp[5] = 0x00; trip distance
-    // esp[6] = 0x00; to be continued
-
-    motor_speed[3] = abs_speed_low;
-    motor_speed[4] = abs_speed_high;
-    motor_speed[5] = abs_speed15_low;
-    motor_speed[6] = abs_speed15_high;
 
     drive_mode[1] = speed_low;
     drive_mode[2] = speed_high;
@@ -544,7 +527,6 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
     }
     if (hz50)
     {
-        canSend(motor_speed);
         canSend(ding);
         canSend(traction);
         canSend(shift);
