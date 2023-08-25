@@ -55,14 +55,15 @@ Packet discovery notes:
 - packet 0x550 draws rear passenger seatbelt status (disappears after a while). Byte 3 contains a bitmask for the 3 seats, probably 2 bits per seat
 - packet 0x58C can also trigger shift lock lamp (byte 7). It also contains brake warning (byte 0)
 - 0x40 in byte 3 of 0x5D0 produces "TRA" notification, whatever it means
-- packet 0x85t0 also triggers airbag/seatbelt warnings
+- packet 0x850 also triggers airbag/seatbelt warnings
 */
 
 struct DashboardSettings
 {
-    unsigned short speed = 0; // speed [km/h]
-    unsigned short rpm = 0;   // revs [rpm]
-    bool backlight = true;    // dashboard backlight (on/off)
+    unsigned short speed = 0;    // speed [km/h]
+    unsigned short rpm = 0;      // revs [rpm]
+    size_t water_temp_index = 0; // water temperature value index (see arrays below)
+    bool backlight = true;       // dashboard backlight (on/off)
     bool clutch_control =
         true; // display clutch message on dashboard display (on/off)
     bool check_lamp =
@@ -73,6 +74,7 @@ struct DashboardSettings
     bool door_open_warning = false;    // open door warning lamp (on/off)
     bool trunk_open_warning = false;   // open trunk warning lamp (on/off)
     bool parking_brake = false;        // parking brake lamp (on/off)
+    bool cruise_control = false;       // cruise control lamp (on/off)
     bool high_water_temp = false;      // high water temperature lamp (on/off) AVOID IT PLEASE, IT'S VERY LOUD
     bool dpf_warning = false;          // DPF warning lamp (on/off)
     bool preheating = false;           // diesel preheating lamp (on/off)
@@ -176,10 +178,11 @@ namespace Packets
     CanPacket immobilizer;
     CanPacket lights;
     CanPacket engine_control;
-    CanPacket airbag; // airbag and seat belt info
-    CanPacket esp;    // engine and ESP
+    CanPacket airbag;     // airbag and seat belt info
+    CanPacket esp;        // engine and ESP
     CanPacket motor_speed;
     CanPacket rpm;
+    CanPacket water_temp; // water temperature and cruise control indicator
     CanPacket drive_mode;
     CanPacket abs1;
     CanPacket abs2;
@@ -190,9 +193,11 @@ namespace Packets
 }
 
 bool is_speed_resetting = false;
-const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16;
+const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16, WATER_TEMPS_SIZE = 31;
 char serial_buffer[SERIAL_BUFF_SIZE];
 unsigned char incoming_can_buffer[INCOMING_CAN_BUFFER_SIZE];
+const signed char WATER_TEMPS[WATER_TEMPS_SIZE] = {-45, -40, -35, -30, -25, -20, -15, -10, -5, 0, 10, 20, 30, 40, 50, 55, 60, 70, 80, 90, 100, 105, 110, 115, 120, 125, 126, 127, 128, 129, 130};
+const unsigned char WATER_TEMP_BYTES[WATER_TEMPS_SIZE] = {0x01, 0x08, 0x0E, 0x15, 0x1C, 0x22, 0x29, 0x30, 0x36, 0x3D, 0x4A, 0x58, 0x66, 0x72, 0x80, 0x85, 0x89, 0x92, 0x9A, 0xA2, 0xD4, 0xD7, 0xDB, 0xDE, 0xE1, 0xE6, 0xE8, 0xE9, 0xEA, 0xEC, 0xED};
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
@@ -215,6 +220,7 @@ void preparePackets()
     // motor speed? doesn't affect the dashboard at all
     Packets::motor_speed = CanPacket(0x320, 0x06, 0, 0, 0, 0, 0, 0, 0x80);  // 20ms / 50Hz
     Packets::rpm = CanPacket(0x280, 0x49, 0x0E, 0, 0, 0x0E, 0, 0x1B, 0x0E); // 20ms / 50Hz
+    Packets::water_temp = CanPacket(0x288, 0, 0, 0, 0, 0, 0, 0, 0);     // unknown, possibly 100ms / 10Hz
     // speed, drivemode, potentially mileage
     Packets::drive_mode = CanPacket(0x5A0, 0xFF, 0, 0, 0, 0, 0, 0, 0xAD); // 100ms / 10Hz
     // ABS1: has to be sent to apply the speed?
@@ -228,6 +234,41 @@ void preparePackets()
     Packets::test_packet = CanPacket(0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
 
     resetEverything();
+}
+
+inline size_t getWaterTempIndex(int water_temp_value)
+{
+    if (water_temp_value <= static_cast<int>(WATER_TEMPS[0]))
+    {
+        return 0;
+    }
+    if (water_temp_value >= static_cast<int>(WATER_TEMPS[WATER_TEMPS_SIZE - 1]))
+    {
+        return WATER_TEMPS_SIZE - 1;
+    }
+    signed char water_temp = static_cast<signed char>(water_temp_value);
+    for (size_t i = 0; i < WATER_TEMPS_SIZE - 1; ++i)
+    {
+        signed char curr = WATER_TEMPS[i], next = WATER_TEMPS[i + 1];
+        if (water_temp > next)
+        {
+            continue;
+        }
+        if (water_temp == curr)
+        {
+            return i;
+        }
+        if (water_temp == next)
+        {
+            return i + 1;
+        }
+        if ((water_temp - curr) <= (next - water_temp))
+        {
+            return i;
+        }
+        return i + 1;
+    }
+    return 0; // for safety
 }
 
 #define SET_BIT(byte_value, state, bitmask) \
@@ -353,6 +394,20 @@ inline void setRPM(unsigned short rpm = dashboard.rpm)
     Packets::rpm[3] = (rpm_prescaled >> 8) & 0xFF;
 }
 
+inline void setWaterTemp(size_t water_temp_index = dashboard.water_temp_index)
+{
+    if (water_temp_index < 0)
+    {
+        water_temp_index = 0;
+    }
+    else if (water_temp_index >= WATER_TEMPS_SIZE)
+    {
+        water_temp_index = WATER_TEMPS_SIZE - 1;
+    }
+    dashboard.water_temp_index = water_temp_index;
+    Packets::water_temp[1] = WATER_TEMP_BYTES[water_temp_index];
+}
+
 inline void setTractionControl(bool on = dashboard.traction_control)
 {
     dashboard.traction_control = on;
@@ -389,6 +444,7 @@ BIT_SETTER(setSeatBeltWarning, seat_belt_warning, airbag, 2, 0x04)
 BIT_SETTER(setDoorOpenWarning, door_open_warning, lights, 1, 0x01)
 BIT_SETTER(setTrunkOpenWarning, trunk_open_warning, lights, 1, 0x20)
 INVERTED_PIN_SETTER(setParkingBrake, parking_brake, PARKING_BRAKE_CONTROL_PIN)
+BIT_SETTER(setCruiseControl, cruise_control, water_temp, 2, 0x80)
 BIT_SETTER(setHighWaterTemp, high_water_temp, engine_control, 1, 0x01)
 BIT_SETTER(setDPFWarning, dpf_warning, engine_control, 5, 0x02)
 BIT_SETTER(setPreheating, preheating, engine_control, 1, 0x02)
@@ -444,6 +500,7 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(immobilizer);
         canSend(engine_control);
         canSend(rpm);
+        canSend(water_temp);
         canSend(airbag);
         canSend(esp);
         canSend(abs1);
@@ -523,12 +580,13 @@ void receivePackets()
 
 inline int str2int(const char *str, int len)
 {
+    bool negate = str[0] == '-';
     int ret = 0;
-    for (int i = 0; i < len; ++i)
+    for (int i = negate ? 1 : 0; i < len; ++i)
     {
         ret = ret * 10 + (str[i] - '0');
     }
-    return ret;
+    return negate ? -ret : ret;
 }
 
 inline int getSeparatorIndex(const char *str, int len)
@@ -730,6 +788,20 @@ bool processSerialCommand()
         break;
     case 'b': // Shift lock (bool)
         setShiftLock(*buffer == '1');
+        break;
+    case 'c': // Water temperature (int)
+        const int separator_index = getSeparatorIndex(buffer, len);
+        if (separator_index == 0)
+        {
+            break;
+        }
+        int water_temp = str2int(buffer,
+                                 (separator_index == -1) ? len : separator_index);
+        size_t water_temp_index = getWaterTempIndex(water_temp);
+        setWaterTemp(water_temp_index);
+        break;
+    case 'd': // Cruise control (bool)
+        setCruiseControl(*buffer == '1');
         break;
     default:
         break;
