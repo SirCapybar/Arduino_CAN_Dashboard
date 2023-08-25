@@ -55,7 +55,7 @@ Packet discovery notes:
 - bit 0x04 in the shift lock byte produces overheat warning (loud)
 - byte 1 and 2 from 0x48A seem to also do something to the RPM
 - packet 0x550 draws rear passenger seatbelt status (disappears after a while). Byte 3 contains a bitmask for the 3 seats, probably 2 bits per seat
-- packet 0x58C can also trigger shift lock lamp (byte 7). It also contains brake warning (byte 0)
+- packet 0x58C can also trigger shift lock lamp (byte 7)
 - 0x40 in byte 3 of 0x5D0 produces "TRA" notification, whatever it means
 - packet 0x850 also triggers airbag/seatbelt warnings
 */
@@ -64,8 +64,9 @@ struct DashboardSettings
 {
     unsigned short speed = 0;              // speed [km/h]
     unsigned short rpm = 0;                // revs [rpm]
-    unsigned char oil_temp = MIN_OIL_TEMP; // oil temperature [°C]
     size_t water_temp_index = 0;           // water temperature value index (see arrays below)
+    unsigned char oil_temp = MIN_OIL_TEMP; // oil temperature [°C]
+    size_t start_stop_state_index = 0;     // start/stop state index (see arrays below)
     bool backlight = true;                 // dashboard backlight (on/off)
     bool clutch_control =
         true; // display clutch message on dashboard display (on/off)
@@ -187,6 +188,7 @@ namespace Packets
     CanPacket rpm;
     CanPacket water_temp; // water temperature and cruise control indicator
     CanPacket oil_temp;   // oil temperature
+    CanPacket start_stop;
     CanPacket drive_mode;
     CanPacket abs1;
     CanPacket abs2;
@@ -197,11 +199,24 @@ namespace Packets
 }
 
 bool is_speed_resetting = false;
-const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16, WATER_TEMPS_SIZE = 31;
+const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16, WATER_TEMPS_SIZE = 31, START_STOP_STATES_SIZE = 9;
 char serial_buffer[SERIAL_BUFF_SIZE];
 unsigned char incoming_can_buffer[INCOMING_CAN_BUFFER_SIZE];
 const signed char WATER_TEMPS[WATER_TEMPS_SIZE] = {-45, -40, -35, -30, -25, -20, -15, -10, -5, 0, 10, 20, 30, 40, 50, 55, 60, 70, 80, 90, 100, 105, 110, 115, 120, 125, 126, 127, 128, 129, 130};
 const unsigned char WATER_TEMP_BYTES[WATER_TEMPS_SIZE] = {0x01, 0x08, 0x0E, 0x15, 0x1C, 0x22, 0x29, 0x30, 0x36, 0x3D, 0x4A, 0x58, 0x66, 0x72, 0x80, 0x85, 0x89, 0x92, 0x9A, 0xA2, 0xD4, 0xD7, 0xDB, 0xDE, 0xE1, 0xE6, 0xE8, 0xE9, 0xEA, 0xEC, 0xED};
+const unsigned char START_STOP_STATE_BYTES[START_STOP_STATES_SIZE] = {0x00, 0x01, 0x02, 0x03, 0x05, 0x0C, 0x0D, 0x0E, 0x0F};
+/*
+    Start/Stop states (by index):
+    0: None
+    1: Start/stop icon
+    2: Start/stop error
+    3: "Start engine manually" message
+    4: "Start/stop disabled" message
+    5: "Engine starting" message
+    6: "Depress clutch" message
+    7: "Move selector level to position P/N" message
+    8: "Apply break" message
+*/
 
 MCP_CAN can(SPI_CS_PIN);
 DashboardSettings dashboard;
@@ -401,11 +416,7 @@ inline void setRPM(unsigned short rpm = dashboard.rpm)
 
 inline void setWaterTempIndex(size_t water_temp_index = dashboard.water_temp_index)
 {
-    if (water_temp_index < 0)
-    {
-        water_temp_index = 0;
-    }
-    else if (water_temp_index >= WATER_TEMPS_SIZE)
+    if (water_temp_index >= WATER_TEMPS_SIZE)
     {
         water_temp_index = WATER_TEMPS_SIZE - 1;
     }
@@ -417,6 +428,16 @@ inline void setOilTemp(unsigned char oil_temp)
 {
     dashboard.oil_temp = oil_temp;
     Packets::oil_temp[7] = oil_temp + 60;
+}
+
+inline void setStartStopStateIndex(size_t start_stop_state_index = dashboard.start_stop_state_index)
+{
+    if (start_stop_state_index >= START_STOP_STATES_SIZE)
+    {
+        start_stop_state_index = START_STOP_STATES_SIZE - 1;
+    }
+    dashboard.start_stop_state_index = start_stop_state_index;
+    Packets::start_stop[0] = START_STOP_STATE_BYTES[start_stop_state_index];
 }
 
 inline void setTractionControl(bool on = dashboard.traction_control)
@@ -511,8 +532,6 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(immobilizer);
         canSend(engine_control);
         canSend(rpm);
-        canSend(water_temp);
-        canSend(oil_temp);
         canSend(airbag);
         canSend(esp);
         canSend(abs1);
@@ -532,6 +551,9 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
     }
     if (hz10)
     {
+        canSend(water_temp);
+        canSend(oil_temp);
+        canSend(start_stop);
         canSend(drive_mode);
     }
 }
@@ -802,6 +824,7 @@ bool processSerialCommand()
         setShiftLock(*buffer == '1');
         break;
     case 'c': // Water temperature (int)
+    {
         const int separator_index = getSeparatorIndex(buffer, len);
         if (separator_index == 0)
         {
@@ -812,10 +835,12 @@ bool processSerialCommand()
         size_t water_temp_index = getWaterTempIndex(water_temp);
         setWaterTempIndex(water_temp_index);
         break;
+    }
     case 'd': // Cruise control (bool)
         setCruiseControl(*buffer == '1');
         break;
     case 'e': // Oil temperature (int)
+    {
         const int separator_index = getSeparatorIndex(buffer, len);
         if (separator_index == 0)
         {
@@ -833,6 +858,23 @@ bool processSerialCommand()
         }
         setOilTemp(oil_temp);
         break;
+    }
+    case 'f': // Start/stop state index (int)
+    {
+        const int separator_index = getSeparatorIndex(buffer, len);
+        if (separator_index == 0)
+        {
+            break;
+        }
+        int start_stop_state_index = str2int(buffer,
+                                             (separator_index == -1) ? len : separator_index);
+        if (start_stop_state_index < 0)
+        {
+            start_stop_state_index = 0;
+        }
+        setStartStopStateIndex(start_stop_state_index);
+        break;
+    }
     default:
         break;
     }
