@@ -198,6 +198,7 @@ namespace Packets
 }
 
 bool is_speed_resetting = false;
+unsigned short travel_distance = 0U;
 const size_t SERIAL_BUFF_SIZE = 64, INCOMING_CAN_BUFFER_SIZE = 16, WATER_TEMPS_SIZE = 31, START_STOP_STATES_SIZE = 9;
 char serial_buffer[SERIAL_BUFF_SIZE];
 unsigned char incoming_can_buffer[INCOMING_CAN_BUFFER_SIZE];
@@ -334,6 +335,14 @@ inline size_t getWaterTempIndex(int water_temp_value)
         digitalWrite(pin, on ? LOW : HIGH);                    \
     }
 
+inline void updateTravelDistance(unsigned long passed_us)
+{
+    double mps50 = dashboard.speed / 3.6 * 50.;
+    mps50 *= passed_us * 1.0e-6;
+    travel_distance += static_cast<unsigned short>(mps50);
+    travel_distance %= 30000U;
+}
+
 inline void setSpeed(unsigned short speed = dashboard.speed)
 {
     using namespace Packets;
@@ -363,6 +372,9 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
     const unsigned char speed_low = speed_prescaled & 0xFF,
                         speed_high = (speed_prescaled >> 8) & 0xFF;
 
+    const unsigned char travel_distance_low = travel_distance & 0xFF,
+                        travel_distance_high = (travel_distance >> 8) & 0xFF;
+
     const unsigned short abs_speed_prescaled =
         static_cast<unsigned short>(static_cast<float>(dashboard.speed) / 0.01f);
     const unsigned char abs_speed_low = abs_speed_prescaled & 0xFF,
@@ -375,6 +387,8 @@ inline void setSpeed(unsigned short speed = dashboard.speed)
 
     drive_mode[1] = speed_low;
     drive_mode[2] = speed_high;
+    drive_mode[5] = travel_distance_low;
+    drive_mode[6] = travel_distance_high;
 
     abs1[2] = abs_speed15_low;
     abs1[3] = abs_speed15_high;
@@ -527,6 +541,8 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
     }
     if (hz50)
     {
+        canSend(drive_mode);
+        updateTravelDistance(20000U);
         canSend(ding);
         canSend(traction);
         canSend(shift);
@@ -536,7 +552,6 @@ void sendPackets(bool hz100, bool hz50, bool hz10, bool hz5)
         canSend(water_temp);
         canSend(oil_temp);
         canSend(start_stop);
-        canSend(drive_mode);
     }
 }
 
